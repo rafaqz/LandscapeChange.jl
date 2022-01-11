@@ -1,9 +1,18 @@
-name = "Landscapes"
+name = "LandscapeChange"
 uuid = "10a95938-cbff-4ff0-a2a3-33d289cf79a5"
 authors = ["Rafael Schouten <rafaelschouten@gmail.com>"]
 version = "0.1.0"
 
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+DynamicGrids = "a5dba43e-3abc-5203-bfc5-584ca68d3f5b"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
 [compat]
+DynamicGrids = "0.21"
+Reexport = "1"
 julia = "1.5"
 
 [extras]
