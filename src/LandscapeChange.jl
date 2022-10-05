@@ -4,8 +4,10 @@ using Reexport
 
 @reexport using DynamicGrids
 
+using DynamicGrids.Neighborhoods
 using DynamicGrids.Setfield
 using DynamicGrids.StaticArrays
+using DynamicGrids.DimensionalData
 
 export LandCoverCount, LandCoverPotential, LandCoverSuitability, LandCoverChange
 

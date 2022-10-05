@@ -5,21 +5,21 @@
     PreallocatedUnorderedList(::Type{T}, maxlen::Int)
     PreallocatedUnorderedList(values::AbstractArray, len::Int)
 
-A very fast fixed-length unordered list. The maximum length is fixed 
-and the order no specified so that `push!` does not need to allocate memory,
+A fast fixed-length unordered list. The maximum length is fixed 
+and the order not specified so that `push!` does not need to allocate memory,
 and `pop!` and `deleteat!` do not not remove memory - they just move values
-from the end of the array to the specified index and shorten the apparent
+from the end of the array to the specified indices and shorten the apparent
 array length.
 """
 mutable struct PreallocatedUnorderedList{T,A<:AbstractArray{T}} <: AbstractVector{T}
     values::A
     len::Int
 end
+PreallocatedUnorderedList(values::AbstractVector) = PreallocatedUnorderedList(values, length(values))
 function PreallocatedUnorderedList(::Type{T}; maxlength::Int) where T
     values = Vector{T}(undef, maxlength)
     PreallocatedUnorderedList(values, 0)
 end
-PreallocatedUnorderedList(values::AbstractVector) = PreallocatedUnorderedList(values, length(values))
 Base.length(list::PreallocatedUnorderedList) = list.len
 Base.size(list::PreallocatedUnorderedList) = (length(list),)
 Base.@propagate_inbounds function Base.getindex(list::PreallocatedUnorderedList, i) 
