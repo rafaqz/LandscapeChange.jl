@@ -18,23 +18,29 @@ is 1 and if not present its 0. The weight function is linear.
 
 Adapted from: https://github.com/johanlahti/urban-lu-model/blob/master/script/Utils.py
 """
-function fuzzy_scores(predicted, real; neighborhood=Window{1}(), ignored=0)
-    broadcast(real, predicted, CartesianIndices(real)) do r, p, I
+function fuzzy_scores(predicted::AbstractDimArray, real::AbstractDimArray; kw...)
+    fuzzy = fuzzy_scores(parent(predicted), parent(real); kw...)
+    return rebuild(predicted; data=fuzzy, name=:fuzzy)
+end
+function fuzzy_scores(predicted, real; neighborhood=Moore{2}(), ignored=0)
+    broadcast_neighborhood(neighborhood, real, predicted) do h, r, p
+        r === p && return _weight(0, h)
         r in ignored && return 0.0
 
         weight = 0.0
         shortestdist = Inf
 
-        # Get neighborhood values from the `real` values array
-        real_hood = _setbuffer(neighborhood, _getwindow(real, Tuple(I)))
         # Search the neighborhood
-        for (hood_val, dist) in zip(neighbors(real_hood), distances(real_hood))
-            if p === hood_val && dist < shortestdist
+        for (neighbor, dist) in zip(neighbors(h), distances(h))
+            if p === neighbor && dist < shortestdist
                 # Store the shortest distance at which we found the value
                 shortestdist = dist
-                weight = 1 - dist / (length(hood) + 1)
+                weight = _weight(dist, h)
             end
+            shortestdist == 1 && break # shortcut when there are no shorter distances
         end
         return weight
     end
 end
+
+_weight(dist, h) = 1 - dist / (length(h) + 1)

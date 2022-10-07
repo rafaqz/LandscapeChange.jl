@@ -57,26 +57,30 @@ gen_landscape(projdims, :target)
 plot(plot.((init, target); c=:viridis)...)
 c = NamedVector((forest=1, cleared=2, settled=3))
 
-@testset "neutral" begin
+@testset "neutral models" begin
     cats = sort(union(init))
     LandscapeChange.adjust(init, target, cats)
     @test length(LandscapeChange.category_list(init, 1)) == count(==(1), init)
-
     @test "Category coverage matches after `RandomConstraintMatch`" begin
         rcm = sim(RandomConstraintMatch(), init, target)
         @test LandscapeChange.adjust(rcm, target, cats) == zero(cats)
         change = rebuild(rcm .- init, name=:change)
         error = rebuild(rcm .- target; name=:error)
-        plot(plot.((init, target, rcm); c=:viridis)..., 
-             plot.((change, error); c=:magma)...
+        @time fuzzy = fuzzy_scores(rcm, target; neighborhood=Moore(2))
+        plot(plot.((rcm, target))...)
+        plot(plot.((init, target, rcm); axis=nothing, c=:viridis)..., 
+             plot.((change, error, fuzzy); axis=nothing, c=:magma)...
         )
     end
     @test "Category coverage matches after `GrowingClusters`" begin
+        LandscapeChange._weight(2, Moore{1}())
         gc = sim(GrowingClusters(), init, target)
         @test LandscapeChange.adjust(gc, target, cats) == zero(cats)
         change = rebuild(gc .- init; name=:change)
         error = rebuild(gc .- target; name=:error)
-        plot(plot.((init, target, gc); c=:viridis)..., plot.((change, error); c=:magma)...)
+        fuzzy_scores(gc, target);
+        plot(plot.((init, target, gc); axis=nothing, c=:viridis)..., 
+             plot.((change, error, fuzzy); axis=nothing, c=:magma)...)
     end
 end
 
@@ -86,7 +90,6 @@ end
     extent = Extent((; landscape, counts); tspan=1:10)
     sd = DynamicGrids.SimData(extent, lu_count_rule)
     sd = step!(sd)
-    sd[:counts]
 
     suitability_params = (
         riverdist=Aux{:distance_to_rivers}(),
@@ -117,3 +120,15 @@ end
     sd = step!(sd)
     sd[:suitability]
 end
+
+using CUDA
+A = LandscapeChange.NamedTuple{(:prob,:state,:inds)}.((zip(rand(Float32, 4000000), rand(1:3, 4000000), 1:4000000)))
+c = CuArray(A)
+@time partialsort!(A, 1:2000000; by=last);
+@time partialsort!(c, 1:2000000; by=last);
+@time partialsort!(c, 1:2000000; by=f);
+
+f(x) = x.state == 1 ? zero(x.prob) : x.prob
+
+
+

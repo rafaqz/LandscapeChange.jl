@@ -1,3 +1,5 @@
+
+
 """
     LandCoverChangeMode
 
@@ -41,6 +43,7 @@ possible land uses.
 struct RawSuitabilities <: SuitabilityScore end
 
 score(::RawSuitabilities, suitabilities) = suitabilities
+
 
 """
     LandCoverCount{R,W} <: NeighborhoodRule

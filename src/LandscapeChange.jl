@@ -17,12 +17,13 @@ export SuitabilityScore, MaxProbability, ChangeProbabilities, RawSuitabilities
 
 export PreallocatedUnorderedList, NamedVector
 
-export sim
+export sim, fuzzy_scores
 
 include("unordered_list.jl")
 include("named_vector.jl")
 include("rules.jl")
 include("neutral.jl")
 include("scores.jl")
+include("white_engalin.jl")
 
 end
