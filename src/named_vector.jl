@@ -5,7 +5,7 @@ struct NamedVector{K,L,T,V} <: FieldVector{L,T}
     NamedVector{K,L,T,V}(nt::NT) where {K,L,T,V<:Tuple,NT<:NamedTuple{K,Tuple{Vararg{T,L}}}} = new{K,L,T,V}(nt)
 end
 NamedVector{K,L,T,V}(t::Tuple{Vararg{T,L}}) where {K,L,T,V<:Tuple} = NamedVector{K,L,T,V}(NamedTuple{K}(t))
-NamedVector{K,L,T,V}(x::T, xs::T...) where {K,L,T,V} = NamedVector{K,L,T,V}((x, xs...))
+NamedVector{K,L,T,V}(x1::T, x2::T, xs::T...) where {K,L,T,V} = NamedVector{K,L,T,V}((x1, x2, xs...))
 
 NamedVector{K,L,T}(t::V) where {K,L,T,V<:Tuple} = NamedVector{K,L,T,V}(t)
 NamedVector{K,L,T}(t::V) where {K,L,T,V<:NamedTuple{K,V1}} where V1 = NamedVector{K,L,T,V1}(t)
@@ -26,15 +26,19 @@ function NamedVector{K,L}(v::SVector{L,T}) where {K,L,T}
 end
 NamedVector(; kw...) = NamedVector{keys(kw),length(kw)}(values(kw)) 
 
+Base.zero(a::NamedVector) = map(x -> zero(x), a)
+Base.one(a::NamedVector) = map(x -> one(x), a)
+Base.oneunit(a::NamedVector) = map(x -> oneunit(x), a)
 Base.parent(a::NamedVector) = getfield(a, :nt)
 Base.values(a::NamedVector) = values(parent(a))
 Base.getproperty(a::NamedVector, x::Symbol) = getproperty(parent(a), x)
+Base.propertynames(a::NamedVector) = propertynames(parent(a))
 Base.@propagate_inbounds Base.getindex(a::NamedVector, i::Int) = getindex(parent(a), i)
 Base.@propagate_inbounds Base.setindex!(a::NamedVector, x, i::Int) = (setindex!(parent(a), i, x); a)
-# Base.map(f, as::Union{NamedVector{K},NamedTuple{K}}...) where K = begin
-Base.map(f, a1::NamedVector{K,L}, as::NamedVector{K}...) where {K,L} = begin
-    NamedVector{K,L}(map(f, map(SVector, (a1, as...))...))
+Base.map(f, a1::NamedVector{K,L}, as::NamedVector{K,L}...) where {K,L} = begin
+    NamedVector{K,L}(map(f, map(SVector{L}, (a1, as...))...))
 end
+Base.show(io::IO, a::NamedVector) = Base.show(io, parent(a))
 
 _maybeparent(a::NamedVector) = parent(a)
 _maybeparent(nt::NamedTuple) = nt

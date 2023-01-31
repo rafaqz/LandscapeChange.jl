@@ -8,6 +8,7 @@ using Test
 using StaticArrays
 
 @testset "NamedVector" begin
+    c = NamedVector((forest=1, cleared=2, settled=3))
     using BenchmarkTools
     NamedVector{(:a,:b,:c),3,Int}(NamedTuple{(:a,:b,:c)}((1,2,3)))
     @btime NamedVector{(:a,:b,:c),3}((1.0,2,3))
@@ -55,7 +56,6 @@ target = rebuild(grow(init, 2; neighborhood=Moore{4}()); name=:target)
 target = rebuild(shrink(init, 2; neighborhood=Moore{3}()); name=:target)
 gen_landscape(projdims, :target)
 plot(plot.((init, target); c=:viridis)...)
-c = NamedVector((forest=1, cleared=2, settled=3))
 
 @testset "neutral models" begin
     cats = sort(union(init))
