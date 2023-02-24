@@ -1,5 +1,5 @@
 """
-    category_change(A, B; categories=union(A))
+    cover_change(A, B; categories=union(A))
 
 Calculate fraction of changes from each category to
 all other categories, between arrays `B` and `B`.
@@ -7,7 +7,7 @@ all other categories, between arrays `B` and `B`.
 Using a `NamedTuple` or `NamedVector` for `categories`
 will give named results.
 """
-function category_change(A, B; categories=union(A))
+function cover_change(A, B; categories=union(A))
     map(categories) do c1
         map(categories) do c2
             if c1 == c2
@@ -23,16 +23,22 @@ function category_change(A, B; categories=union(A))
     end
 end
 
-function category_fractions(A; categories=union(A))
+"""
+    cover_fraction(A; categories=union(A))
+
+Calculate the fractions of the (non-missing valued)
+map covered by each category.
+"""
+function cover_fraction(A; categories=union(A))
     total_count = count(_ -> true, skipmissing(A))
     map(categories) do c
-        category_count = count(==(c), skipmissing(A))
-        category_count / total_count
+        cover_count = count(==(c), skipmissing(A))
+        cover_count / total_count
     end
 end
 
 """
-    category_persistence(A, B; categories=union(A))
+    cover_persistence(A, B; categories=union(A))
 
 Calculate fraction of persistence of each category 
 between arrays `B` and `B`.
@@ -40,7 +46,7 @@ between arrays `B` and `B`.
 Using a `NamedTuple` or `NamedVector` for `categories`
 will give named results.
 """
-function category_persistence(A, B; categories=union(A))
+function cover_persistence(A, B; categories=union(A))
     map(categories) do c
         nstart = count(==(c), A)
         npersisted = count(zip(A, B)) do (a, b)

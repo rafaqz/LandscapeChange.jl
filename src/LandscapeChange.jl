@@ -19,7 +19,7 @@ export SuitabilityScore, MaxProbability, ChangeProbabilities, RawSuitabilities
 
 export PreallocatedUnorderedList, NamedVector
 
-export sim, fuzzy_scores, category_change, category_persistance
+export sim, fuzzy_scores, cover_change, cover_persistence, cover_fraction
 
 import DynamicGrids.Neighborhoods: neighbors, unsafe_neighbors, neighborhood,
     kernel, kernelproduct, offsets, positions, radius, distances, distance_zones,
@@ -32,6 +32,7 @@ include("rules.jl")
 include("neutral.jl")
 include("scores.jl")
 include("statistics.jl")
+include("bottom_up.jl")
 include("white_engalin.jl")
 
 end

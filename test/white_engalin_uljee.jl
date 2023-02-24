@@ -8,10 +8,10 @@ s = 500
 # Define suitability maps
 suitability_a = rand(PerlinNoise((3, 3)), X(s), Y(s); name="suitability a") ./ 5 .+ 0.3
 suitability_b = rand(PerlinNoise((4, 4)), X(s), Y(s); name="suitability b")
-# plot(
-#     heatmap(suitability_a; aspect_ratio=1), 
-#     heatmap(suitability_b; aspect_ratio=1),
-# )
+plot(
+    heatmap(suitability_a; aspect_ratio=1), 
+    heatmap(suitability_b; aspect_ratio=1),
+)
 suitability = map(suitability_a, suitability_b) do a, b
     NamedVector(; a, b)
 end
@@ -34,7 +34,7 @@ counts = DimArray(map(a_counts, b_counts) do a, b
     NamedVector(; a, b)
 end, Ti)
 
-inertia = NamedVector(a=0.4, b=0.99999)
+SArray(inertia)
 fixed = false # or a raster mask of fixed landcover
 
 # transition_distributions = = (;
@@ -55,8 +55,8 @@ transitions = (;
 
 A = rand(1:3, 100, 100)
 B = rand(1:3, 100, 100)
-category_change(A, B; categories=(x=1, y=2, z=3)) |> pairs
-category_persistance(A, B; categories=(z=1, x=2, y=3))
+cover_change(A, B; categories=(x=1, y=2, z=3)) |> pairs
+cover_persistence(A, B; categories=(z=1, x=2, y=3))
 
 weight_rule = WhiteEngalinUljeeWeights{:state,:weight}(;
     neighborhood=Window(1),
@@ -65,33 +65,31 @@ weight_rule = WhiteEngalinUljeeWeights{:state,:weight}(;
     transitions,
     suitability=Aux{:suitability}(),
     fixed,
-    perturbation=0.01,
+    perturbation=0.001,
 )
 update_rule = WhiteEngalinUljeeUpdate{Tuple{},Tuple{:weight,:state}}(Aux(:counts), states)
 
 rs = (weight_rule, update_rule)
 
-using WGLMakie
-WGLMakie.activate!()
+using GLMakie
+GLMakie.activate!()
 
 x = Observable(Float32.(parent(init_state.state)))
+Makie.heatmap(x)
 
 output = TransformedOutput(init_state; 
     aux=(; counts, suitability),
-    tspan=1:20,
+    tspan=1:0.1:50,
     store=false,
     padval=(state=0x01, weight=zero(eltype(init_state.weight))), 
 ) do layers
     x[] .= Float32.(parent(layers.state))
     notify(x)
+    sleep(0.001)
     nothing
 end
-
-using ProfileView
 # WGLMakie.activate!()
-Makie.heatmap(x)
 @time sim!(output, rs);
-@profview sim!(output, rs);
 
 function JSServe.serialize_binary(session::JSServe.Session, msg::JSServe.SerializedMessage)
     return transcode(Noop, JSServe.MsgPack.pack(msg))
@@ -104,4 +102,3 @@ end
 #     )
 # end
 # gif(anim, "weu.gif", fps=5)
-

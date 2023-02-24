@@ -1,8 +1,8 @@
 """
-    WhiteEngalinUljeeWeights <: NeighborhoodRule
+    BottomUp <: NeighborhoodRule
 
 Follows "The use of constrained cellula automata for high-resolution modelling
-of urban land-use dynamics", White and Engalin (1996)
+of urban land-use dynamics", BottomUp and Engalin (1996)
 
 Abstract:
 > "A cellular automaton is specified to give a spatially detailed representation of the evolution
@@ -33,34 +33,37 @@ where:
     All values must be between [0, 1]
 - `perturbation`: perturbation scalar. A single value, `NamedVector`, an `Aux` value or another `Grid`.
 """
-struct WhiteEngalinUljeeWeights{R,W,N,St<:NamedVector,T,Su,H,F,α} <: NeighborhoodRule{R,W}
+struct BottomUp{R,W,N,St<:NamedVector,T,Su,H,P,F,α} <: NeighborhoodRule{R,W}
     neighborhood::N
     states::St
     transitions::T
     suitability::Su
     inertia::H
+    pressure::P
     fixed::F
     perturbation::α
 end
-function WhiteEngalinUljeeWeights{R,W}(; 
+function BottomUp{R,W}(; 
     neighborhood,
     states,
     transitions,
     suitability,
     inertia=0.0,
+    pressure=0.0,
     fixed=false,
     perturbation=0.0,
 ) where {R,W}
-    length(transitions) == length(states) || throw(ArgumentError("number of transitions $(length(transitions)) does not match number of states $(length(states))"))
-    length(inertia) == length(states) || throw(ArgumentError("number of inertia values $(length(inertia)) does not match number of states $(length(states))"))
+    length(transitions) == length(states) || throw(ArgumentError("Number of transitions $(length(transitions)) does not match number of states $(length(states))"))
+    length(inertia) == length(states) || throw(ArgumentError("Number of inertia values $(length(inertia)) does not match number of states $(length(states))"))
+    # length(pressure) == length(states) || throw(ArgumentError("Number of pressure values $(length(pressure)) does not match number of states $(length(states))"))
     all(t -> length(t) == length(transitions), transitions) || throw(ArgumentError("transition lengths do not match"))
-    WhiteEngalinUljeeWeights{R,W}(neighborhood, states, transitions, suitability, inertia, fixed, perturbation)
+    BottomUp{R,W}(neighborhood, states, transitions, suitability, inertia, pressure, fixed, perturbation)
 end
 
-function DynamicGrids.applyrule(data, rule::WhiteEngalinUljeeWeights, h::Integer, I)
+function DynamicGrids.applyrule(data, rule::BottomUp, h::T, I) where T<:Integer
     # Cells with fixed states dont change
     get(data, rule.fixed, I) && return active
-
+    pressure = get(data, rule.pressure, I)
     suitability = get(data, rule.suitability, I)
     perturbation = get(data, rule.perturbation, I)
     inertia = get(data, rule.inertia, I)
@@ -73,65 +76,43 @@ function DynamicGrids.applyrule(data, rule::WhiteEngalinUljeeWeights, h::Integer
             σm + rule.transitions[Int(j)][Int(k)][Int(d)]
         end
     end
+    
     # For sum, suitability and inertia of each class
     # calculate transition potentials P_hj
-    P_hj = map(Σw, suitability, inertia, rule.states) do σw, s, Hmax, j
+    P_hj = map(values(Σw), values(suitability), values(inertia), values(rule.states), values(rule.pressure)) do σw, s, Hmax, j, p
         # Define a stochastic disturbance term `v`
         @fastmath v = 1.0 + (-log(rand()))^α
         # v = (1.0 + rand())::Float64
-        # v = 1 + rand() * α
+        v = 1 + (rand() ^ 2) * α
         # Inertia only applies when j == h 
         H = Hmax * (j == h)
         # Equation 1
-        v * s * (1 + σw) + H
+        v * s * (1 + σw) + H + p
     end
+
     # Choose the most probable next state
     probability, i = findmax(SVector(P_hj))
-    return StateWeight(typeof(h)(rule.states[i]), probability, CartesianIndex(I))
+    # Just set the cell to the next state now
+    return convert(T, i)
 end
 
-struct StateWeight{S,W}
-    state::S
-    weight::W
-    I::CartesianIndex{2}
-end
-StateWeight(; state, weight, I) = StateWeight(state, weight, I) 
-
-struct WhiteEngalinUljeeUpdate{R,W,N,S} <: SetGridRule{R,W} 
-    nrequired::N
-    states::S
-end
-
-Base.zero(::T) where T<:StateWeight = Base.zero(T)
-Base.zero(::Type{<:StateWeight}) =
-    Base.zero(StateWeight{UInt8,Float64})
-Base.zero(::Type{<:StateWeight{S,W}}) where {S,W} =
-    StateWeight(zero(S), zero(W), CartesianIndex(0,0))
-
-function DynamicGrids.applyrule!(data, rule::WhiteEngalinUljeeUpdate{Tuple{},Tuple{Weight,State}}
-) where {Weight,State}
-    w = deepcopy(parent(source(data[Weight])))
-    raw = vec(w)
-    nrequired = get(data, rule.nrequired)
-
-    # For how many of each state are reuired for this timestep
-    foreach(nrequired, rule.states) do nreq, state
-        # @show state nreq
-        # Sort by maximum probability for this state, for however many we require
-        partialsort!(raw, 1:nreq;
-            by=x -> x.state == state ? x.weight : zero(x.weight),
-            rev=true,
-        )
-        # Set the most probable indices to the new state
-        most_probable = view(raw, 1:nreq)
-        foreach(most_probable) do x
-            if checkbounds(Bool, data[State], x.I)
-                data[State][x.I] = state
-                w[x.I] = zero(x)
+function DynamicGrids.modifyrule(rule::BottomUp, data)
+    # Transitions are functions. 
+    # We need them to be values during the simulation
+    # any(x -> x isa Function, rule.transitions) || return rule
+    all_transitions = map(rule.transitions) do funcs
+        map(funcs) do f
+            map(distance_zones(neighborhood(rule)), distances(neighborhood(rule))) do dz, d
+                dz => f(d)
             end
         end
     end
-    return nothing
+    transition_list = map(all_transitions) do xs
+        map(xs) do vs
+            l = Float64.(last.(sort(union(vs))))
+            SVector{length(l)}(l...)
+        end
+    end
+    @set rule.transitions = transition_list
 end
-
 

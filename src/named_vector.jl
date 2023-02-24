@@ -26,6 +26,7 @@ function NamedVector{K,L}(v::SVector{L,T}) where {K,L,T}
 end
 NamedVector(; kw...) = NamedVector{keys(kw),length(kw)}(values(kw)) 
 
+Base.pairs(a::NamedVector) = Base.pairs(parent(a))
 Base.zero(a::NamedVector) = map(x -> zero(x), a)
 Base.one(a::NamedVector) = map(x -> one(x), a)
 Base.oneunit(a::NamedVector) = map(x -> oneunit(x), a)
@@ -39,6 +40,13 @@ Base.map(f, a1::NamedVector{K,L}, as::NamedVector{K,L}...) where {K,L} = begin
     NamedVector{K,L}(map(f, map(SVector{L}, (a1, as...))...))
 end
 Base.show(io::IO, a::NamedVector) = Base.show(io, parent(a))
+Base.merge(a::NamedVector) = a
+# Base.merge(a::NamedVector, b::NamedVector, args...) =
+    # NamedVector(merge(merge(parent(a), parent(b)), args...)
+Base.merge(a::NamedVector, b::NamedTuple, args...) =
+    NamedVector(merge(merge(parent(a), b), args...))
+Base.merge(a::NamedTuple, b::NamedVector, args...) =
+    merge(merge(a, parent(b)), args...)
 
 _maybeparent(a::NamedVector) = parent(a)
 _maybeparent(nt::NamedTuple) = nt
