@@ -81,7 +81,7 @@ function DynamicGrids.applyrule(data, rule::BottomUp, h::T, I) where T<:Integer
     # calculate transition potentials P_hj
     P_hj = map(values(Σw), values(suitability), values(inertia), values(rule.states), values(rule.pressure)) do σw, s, Hmax, j, p
         # Define a stochastic disturbance term `v`
-        @fastmath v = 1.0 + (-log(rand()))^α
+        # @fastmath v = 1.0 + (-log(rand()))^α
         # v = (1.0 + rand())::Float64
         v = 1 + (rand() ^ 2) * α
         # Inertia only applies when j == h 
