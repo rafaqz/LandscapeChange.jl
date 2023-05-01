@@ -16,21 +16,32 @@ mutable struct MakieOutput{T,Fr<:AbstractVector{T},E,GC,RS<:Ruleset,Fi,A,PM,TI} 
     frame_obs::PM
     t_obs::TI
 end
-function MakieOutput(f::Function, init::Union{NamedTuple,AbstractMatrix}; extent=nothing, kw...)
+function MakieOutput(f::Function, init::Union{NamedTuple,AbstractArray}; extent=nothing, store=false, kw...)
     # We have to handle some things manually as we are changing the standard output frames
     extent = extent isa Nothing ? Extent(; init=init, kw...) : extent
     # Build simulation frames from the output of `f` for empty frames
-    frames = [deepcopy(init) for _ in DynamicGrids.tspan(extent)]
+    if store
+        frames = [deepcopy(init) for _ in DG.tspan(extent)]
+    else
+        frames = [deepcopy(init)]
+    end
 
-    return MakieOutput(; frames, running=false, extent, f, kw...)
+    return MakieOutput(; frames, running=false, extent, store, f, kw...)
 end
 # Most defaults are passed in from the generic ImageOutput constructor
 function MakieOutput(;
     frames, running, extent, ruleset,
-    extrainit=Dict(), throttle=0.1, interactive=true,
-    fig=Figure(), plotgrid=GridLayout(fig[1,1]), axis=Axis(plotgrid[1, 1]), f=heatmap!, 
-    inputgrid=GridLayout(fig[2, 1]),
+    extrainit=Dict(), 
+    throttle=0.1, 
+    interactive=true,
+    fig=Figure(), 
+    plotgrid=GridLayout(fig[1:4,1]), 
+    f=heatmap!, 
+    inputgrid=GridLayout(fig[5, 1]),
     graphicconfig=nothing,
+    simdata=nothing,
+    sim_kw=(;),
+    slider_kw=(;),
     kw...
 )
     graphicconfig = if isnothing(graphicconfig) 
@@ -38,21 +49,29 @@ function MakieOutput(;
     end
     # Observables that update during the simulation
     t_obs = Observable{Int}(1)
-    frame_obs = Observable{Any}(first(frames))
+    frame_obs = Observable{Any}(nothing)
 
     # Page and output construction
     output = MakieOutput(
-        frames, running, extent, graphicconfig, ruleset, fig, axis, frame_obs, t_obs
+        frames, running, extent, graphicconfig, ruleset, fig, nothing, frame_obs, t_obs
     )
+    simdata = DynamicGrids.initdata!(simdata, output, extent, ruleset)
 
     # Widgets
-    timedisplay = _time_text(t_obs)
     controlgrid = GridLayout(inputgrid[1, 1])
     slidergrid = GridLayout(inputgrid[2, 1])
-    _add_control_widgets!(fig, controlgrid, output, ruleset, extrainit)
-    sliders = _rule_sliders!(fig, slidergrid, ruleset, throttle, interactive)
+    _add_control_widgets!(fig, controlgrid, output, simdata, ruleset, extrainit, sim_kw)
+    if interactive 
+        attach_sliders!(fig, ruleset; grid=slidergrid, throttle, slider_kw)
+    end
     
-    f(plotgrid, axis, frame_obs)
+    # Set up plot with the first frame
+    if keys(simdata) == (:_default_,)
+        frame_obs[] = DynamicGrids.gridview(first(DynamicGrids.grids(simdata)))
+    else
+        frame_obs[] = map(DynamicGrids.gridview, DynamicGrids.grids(simdata))
+    end
+    f(plotgrid, frame_obs)
 
     return output
 end
@@ -62,29 +81,32 @@ Base.display(o::MakieOutput) = display(o.fig)
 
 # # DynamicGrids interface
 DynamicGrids.isasync(o::MakieOutput) = true
+DynamicGrids.ruleset(o::MakieOutput) = o.ruleset
 function DynamicGrids.showframe(frame::NamedTuple, o::MakieOutput, data)
     # Update simulation image, makeing sure any errors are printed in the REPL
     try
-        # if keys(frame) == :_default_
+        # println("writing frame to observable")
+        if keys(frame) == (:_default_,)
             o.frame_obs[] = first(frame)
-            notify(o.frame_obs)
-        # else
-            # o.frame_obs[] = frame
-        # end
-        o.t_obs[] = currentframe(data)
+        else
+            o.frame_obs[] = frame
+        end
+        # println("notifying frame observable")
+        # println("notifying time observable")
+        o.t_obs[] = DG.currentframe(data)
         notify(o.t_obs)
     catch e
-        println(e)
+        println(stdout, String(e)[1:10])
     end
     return nothing
 end
 
-function attach_sliders!(f::Function, fig, model::AbstractModel; grid=fig, kwargs...)
-    attach_sliders!(fig, model; kwargs..., f=f)
+function attach_sliders!(f::Function, fig, model::AbstractModel; grid=fig, kw...)
+    attach_sliders!(fig, model; kw..., f=f)
 end
 function attach_sliders!(fig, model::AbstractModel;
     ncolumns=nothing, submodel=Nothing, throttle=0.1, obs=nothing, f=identity,
-    slider_kw=(;), grid=GridLayout(fig[2, 1]),
+    slider_kw=(;), grid=GridLayout(fig[2, 1]), 
 )
     length(DynamicGrids.params(model)) == 0 && return 
 
@@ -163,7 +185,9 @@ function param_sliders!(fig, model::AbstractModel; grid=fig, throttle=0.1, slide
     return sg, slider_obs
 end
 
-function _add_control_widgets!(fig, grid, o, ruleset, extrainit)
+function _add_control_widgets!(
+    fig, grid, o::Output, simdata::AbstractSimData, ruleset::Ruleset, extrainit, sim_kw
+)
     # We use the init dropdown for the simulation init, even if we don't 
     # show the dropdown because it only has 1 option.
     extrainit[:init] = deepcopy(DynamicGrids.init(o))
@@ -174,18 +198,29 @@ function _add_control_widgets!(fig, grid, o, ruleset, extrainit)
     grid[1, 3] = stop = Button(fig; label="stop")
     grid[1, 4] = fps_slider = Slider(fig; range=1:200, startvalue=DynamicGrids.fps(o))
     grid[1, 5] = init_dropdown = Menu(fig; options=Tuple.(collect(pairs(extrainit))), prompt="Choose init...")
+    grid[2, 1:4] = time_slider = Slider(fig; startvalue=o.t_obs[], range=(1:length(DG.tspan(o))), horizontal=true)
+    grid[2, 5] = time_display = Textbox(fig; stored_string=string(first(DG.tspan(o)))) 
 
+    on(o.t_obs) do f
+        time_display.displayed_string[] = string(DG.tspan(o)[f])
+    end
     # Control mappings. Make errors visible in the console.
     on(sim.clicks) do _
+        if DG.isrunning(o) 
+            @info "there is already a simulation running"
+            return nothing
+        end
         try
-            !DG.isrunning(o) && sim!(o, ruleset; init=init_dropdown.selection[])
+            Base.invokelatest() do
+                sim!(o, ruleset; init=init_dropdown.selection[], sim_kw...)
+            end
         catch e
-            println(e)
+            println(stdout, e)
         end
     end
     on(resume.clicks) do _
         try
-            !DG.isrunning(o) && resume!(o, ruleset; tstop=last(tspan(o)))
+            !DG.isrunning(o) && resume!(o, ruleset; tstop=last(DG.tspan(o)))
         catch e
             println(e)
         end
@@ -194,7 +229,7 @@ function _add_control_widgets!(fig, grid, o, ruleset, extrainit)
         try
             DG.setrunning!(o, false)
         catch e
-            println(e)
+            println(stdout, e)
         end
     end
     on(fps_slider.value) do fps
@@ -202,8 +237,25 @@ function _add_control_widgets!(fig, grid, o, ruleset, extrainit)
             DG.setfps!(o, fps)
             DG.settimestamp!(o, o.t_obs[])
         catch e
-            println(e)
+            println(stdout, e)
         end
+    end
+    on(time_slider.value) do val
+        try
+            if val < o.t_obs[]
+                println(stdout, "resetting time...")
+                DG.setrunning!(o, false)
+                sleep(0.1)
+                DG.setstoppedframe!(output, val)
+                DG.resume!(o; tstop=last(DG.tspan(o)))
+            end
+        catch e
+            println(stdout, e)
+        end
+    end
+
+    on(o.t_obs) do val
+        set_close_to!(time_slider, val)
     end
 
     return nothing
@@ -212,19 +264,6 @@ end
 
 # Widget buliding
 
-function _time_text(t_obs::Observable)
-    timedisplay = Observable{Any}("0")
-    map!(timedisplay, t_obs) do t
-        string(t)
-    end
-    return timedisplay
-end
-
-function _rule_sliders!(fig, grid, ruleset, throttle, interactive)
-    if interactive 
-        return attach_sliders!(fig, ruleset; grid, throttle=throttle, submodel=Rule) 
-    end
-end
 #
 function _makerange(bounds::Tuple, val::T) where T
     SLIDER_STEPS = 100

@@ -33,20 +33,22 @@ where:
     All values must be between [0, 1]
 - `perturbation`: perturbation scalar. A single value, `NamedVector`, an `Aux` value or another `Grid`.
 """
-struct BottomUp{R,W,N,St<:NamedVector,T,Su,H,P,F,α} <: NeighborhoodRule{R,W}
+struct BottomUp{R,W,N,St<:NamedVector,T,L,Su,H,P,F,α} <: NeighborhoodRule{R,W}
     neighborhood::N
     states::St
     transitions::T
+    logic::L
     suitability::Su
     inertia::H
     pressure::P
     fixed::F
     perturbation::α
 end
-function BottomUp{R,W}(; 
+function BottomUp{R,W}(;
     neighborhood,
     states,
     transitions,
+    logic=map(ts -> map(_ -> true, ts), transitions), # all true by default
     suitability,
     inertia=0.0,
     pressure=0.0,
@@ -54,65 +56,101 @@ function BottomUp{R,W}(;
     perturbation=0.0,
 ) where {R,W}
     length(transitions) == length(states) || throw(ArgumentError("Number of transitions $(length(transitions)) does not match number of states $(length(states))"))
+    # length(logic) == length(states) || throw(ArgumentError("Number of logic $(length(logic)) does not match number of states $(length(states))"))
     length(inertia) == length(states) || throw(ArgumentError("Number of inertia values $(length(inertia)) does not match number of states $(length(states))"))
+    ((pressure isa Function) || length(pressure) == length(states)) || throw(ArgumentError("Number of pressure values $(length(pressure)) does not match number of states $(length(states))"))
     # length(pressure) == length(states) || throw(ArgumentError("Number of pressure values $(length(pressure)) does not match number of states $(length(states))"))
     all(t -> length(t) == length(transitions), transitions) || throw(ArgumentError("transition lengths do not match"))
-    BottomUp{R,W}(neighborhood, states, transitions, suitability, inertia, pressure, fixed, perturbation)
+    BottomUp{R,W}(neighborhood, states, transitions, logic, suitability, inertia, pressure, fixed, perturbation)
 end
 
-function DynamicGrids.applyrule(data, rule::BottomUp, h::T, I) where T<:Integer
+function DynamicGrids.applyrule(data, rule::BottomUp, current_state::T, I) where T<:Integer
+    current_state == zero(current_state) && return current_state
     # Cells with fixed states dont change
-    get(data, rule.fixed, I) && return active
-    pressure = get(data, rule.pressure, I)
-    suitability = get(data, rule.suitability, I)
+    get(data, rule.fixed, I) && return current_state
+    # Get the future state from aux
+    future_state::Int64 = get(data, Aux{:history}(), I)
+    # In case there is a masked cell just change state
+    future_state == zero(current_state) && return future_state
+    # Don't change states if its already the future state 
+    current_state == future_state && return current_state
+
+    pressures = get(data, rule.pressure, I)
+    suitabilities = get(data, rule.suitability, I)
     perturbation = get(data, rule.perturbation, I)
-    inertia = get(data, rule.inertia, I)
+    inertias = get(data, rule.inertia, I)
     α = rule.perturbation
-    
+
     # Calculate transition probabilities for each active state
-    Σw = map(_ -> 0.0, suitability)
-    for (k, d) in zip(neighbors(rule), distance_zones(rule))
-        Σw = map(Σw, rule.states) do σm, j
-            σm + rule.transitions[Int(j)][Int(k)][Int(d)]
+    neighbor_weights = map(_ -> 0.0, suitabilities)
+    nbrs = neighbors(rule)
+    dist_zones = distance_zones(rule)
+    for i in 1:length(dist_zones)
+        if nbrs[i] != zero(current_state)
+            neighbor_weights = map(neighbor_weights, rule.states) do σm, state
+                σm + rule.transitions[Int(state)][nbrs[i]][dist_zones[i]+1]
+            end
         end
     end
-    
+
     # For sum, suitability and inertia of each class
     # calculate transition potentials P_hj
-    P_hj = map(values(Σw), values(suitability), values(inertia), values(rule.states), values(rule.pressure)) do σw, s, Hmax, j, p
+    transition_potentials = map(
+            values(neighbor_weights),
+            values(suitabilities),
+            values(inertias),
+            values(rule.states),
+            values(pressures)
+        ) do weight, suitability, inertia, potential_state, pressure
+        # If we cant logically switch to this state return the typemin
+        rule.logic.indirect[future_state][potential_state] || return typemin(typeof(weight))
+        rule.logic.direct[potential_state][current_state] || return typemin(typeof(weight))
         # Define a stochastic disturbance term `v`
         # @fastmath v = 1.0 + (-log(rand()))^α
         # v = (1.0 + rand())::Float64
-        v = 1 + (rand() ^ 2) * α
-        # Inertia only applies when j == h 
-        H = Hmax * (j == h)
-        # Equation 1
-        v * s * (1 + σw) + H + p
+        # v = 1 + (rand() ^ 2 * rand((-1, 1))) * α
+        noise = 1 + (rand()^5 * 2 - 1) * rule.perturbation
+        # Inertia only applies when state == current_state
+        H = inertia * (potential_state == current_state)
+        return suitability * (1 + weight) * pressure + H + noise
     end
 
-    # Choose the most probable next state
-    probability, i = findmax(SVector(P_hj))
+    # The index with highest probability is the next state
+    _, i = findmax(SVector(transition_potentials))
     # Just set the cell to the next state now
     return convert(T, i)
 end
 
-function DynamicGrids.modifyrule(rule::BottomUp, data)
-    # Transitions are functions. 
-    # We need them to be values during the simulation
-    # any(x -> x isa Function, rule.transitions) || return rule
-    all_transitions = map(rule.transitions) do funcs
-        map(funcs) do f
-            map(distance_zones(neighborhood(rule)), distances(neighborhood(rule))) do dz, d
-                dz => f(d)
-            end
-        end
+function DynamicGrids.modifyrule(rule::BottomUp{grid}, data) where grid
+    if rule.pressure isa Function
+        pressure = rule.pressure(data, rule)
+        println(stdout, pressure)
+        @set! rule.pressure = pressure
     end
-    transition_list = map(all_transitions) do xs
-        map(xs) do vs
-            l = Float64.(last.(sort(union(vs))))
-            SVector{length(l)}(l...)
-        end
-    end
-    @set rule.transitions = transition_list
+    @set rule.transitions = transitions_to_vectors(rule)
 end
 
+function transitions_to_vectors(rule)
+    dists = sort(union(distances(neighborhood(rule))))
+    transitions = map(rule.transitions) do xs
+        map(xs) do x
+            map(1:length(dists)) do i
+                if x isa Distributions.Distribution
+                    # Normalised exponential
+                    Distributions.pdf(x, dists[i]) ./ Distributions.pdf(x, 0)
+                else
+                    x
+                end
+            end |> SVector{length(dists)}
+        end
+    end
+end
+
+# function DynamicGrids.validaterule(rule::BottomUp, data)
+#     get(data, rule.fixed, I) && return h
+#     pressure = get(data, rule.pressure, I)
+#     suitability = get(data, rule.suitability, I)
+#     perturbation = get(data, rule.perturbation, I)
+#     inertia = get(data, rule.inertia, I)
+#     α = rule.perturbation
+# end

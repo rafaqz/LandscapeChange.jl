@@ -4,7 +4,7 @@ using Revise, GLMakie
 using Distributions
 
 
-includet("../src/makie.jl")
+includet("/home/raf/.julia/dev/LandscapeChange/src/makie.jl")
 
 # Define the states we are working with
 states = NamedVector(a=1, b=2, c=3)
@@ -28,7 +28,7 @@ init_state = rand(1:3, size(suitability_a))
 
 # Set an initial state where b has started in
 # its absolute most suitable areas
-heatmap(init_state)
+# Plots.heatmap(init_state)
         
 # Calculate change rates to drive the simulation
 growth = vcat(0:0.5:10, 10:-0.5:0) # 10x growth over 10 timesteps
@@ -50,18 +50,12 @@ b = (; bounds=(0.0, 1.0))
 #     c=(; a=(d1=0.0, d2=0.0, d3=0.0), b=(d1=0.0, d2=0.0, d3=0.0), c=(d1=Param(1.0; b...), d2=Param(0.8; b...), d3=Param(0.8; b...))),
 # )
 
-transitions = let 
-    # Hack to have parameters in Distributions
-    kw = (; bounds=(0, 10.0))
-    e1 = Param(1.0; kw...)
-    e2 = Param(1.0; kw...)
-    e3 = Param(1.0; kw...)
-    (;
-         a=(; a=x -> pdf(Exponential(e1), x), b=_ -> 0.0, c=_ -> 0.0),
-         b=(; a=_ -> 0.0, b=x -> pdf(Exponential(e2), x), c=_ -> 0.0),
-         c=(; a=_ -> 0.0, b=_ -> 0.0, c=x -> pdf(Exponential(e3), x)),
-    )
-end
+kw = (; bounds=(0.01, 1.0))
+transitions = (;
+    a=(; a=Exponential( Param(1.0; kw...)), b=0.0, c=0.0),
+    b=(; a=0.0, b=Exponential(Param(1.0; kw...)), c=0.0),
+    c=(; a=0.0, b=0.0, c=Exponential(Param(1.0; kw...))),
+)
 A = rand(1:3, 100, 100)
 B = rand(1:3, 100, 100)
 C = rand(1:3, 100, 100)
@@ -77,7 +71,7 @@ cover_persistence(A, B; categories=(z=1, x=2, y=3))
 # grid = GridLayout(fig[2, 1])
 
 weight_rule = LandscapeChange.BottomUp(;
-    neighborhood=Moore(1),
+    neighborhood=Window(4),
     states,                                     
     inertia=(a=Param(0.8; b..., label="inertia a"), b=Param(0.8; b..., label="inertia b"), c=Param(0.8; b..., label="inertia c")),
     transitions,
@@ -86,29 +80,40 @@ weight_rule = LandscapeChange.BottomUp(;
     fixed,
     perturbation=Param(0.1; bounds=(0.0, 5.0), label="perturbation"),
 )
-ruleset = Ruleset(weight_rule);
+ruleset = Ruleset(weight_rule; proc=CPUGPU());
 
 output = MakieOutput(parent(init_state);
     aux=(; counts, suitability),
-    tspan=1:.1:50,
+    tspan=1:.1:200,
     store=false,
-    padval=0x01,
+    boundary=Wrap(),
+    padval=1,
     ruleset,
 ) do fig, axis, frame
+    hm = Makie.heatmap!(axis, frame; colorrange=(1, 3), colormap=:Juarez)
     hm = Makie.heatmap!(axis, frame; colorrange=(1, 3), colormap=:Juarez)
     Colorbar(fig[1, 2], hm)
 end
 display(output.fig)
 
-output = ArrayOutput(parent(init_state);
-    aux=(; suitability),
-    tspan=1:3,
-    store=false,
-    padval=0x01,
-    ruleset)
-@time sim!(output, ruleset);
+# output.fig[3, 1] = ax
 
-# WGLMakie.activate!()
-using ProfileView
-@profview sim!(output, ruleset);
-output
+output = ResultOutput(parent(init_state);
+    aux=(; suitability),
+    tspan=1:10,
+    store=false,
+    padval=1,
+    ruleset)
+sim!(output, ruleset);
+
+
+# using ProfileView
+# @profview sim!(output, ruleset);
+# using Cthulhu
+# rs = StaticRuleset(ruleset)
+# @descend isinferred(sd)
+# sim!(output, ruleset);
+# @descend 
+# @time sim!(output, ruleset; proc=DynamicGrids.CPUGPU());
+# using CUDAKernels
+# @time sim!(output, ruleset; proc=DynamicGrids.CuGPU());
