@@ -5,7 +5,7 @@ using Reexport
 @reexport using DynamicGrids
 
 import Distributions
-using DynamicGrids.Neighborhoods
+using DynamicGrids.Stencils
 using DynamicGrids.Setfield
 using DynamicGrids.StaticArrays
 using DynamicGrids.DimensionalData
@@ -22,9 +22,8 @@ export PreallocatedUnorderedList, NamedVector
 
 export sim, fuzzy_scores, cover_change, cover_persistence, cover_fraction
 
-import DynamicGrids.Neighborhoods: neighbors, unsafe_neighbors, neighborhood,
+import DynamicGrids.Stencils: neighbors, unsafe_neighbors, stencil, unsafe_stencil,
     kernel, kernelproduct, offsets, positions, radius, distances, distance_zones,
-    setneighbors, update_neighborhood, unsafe_update_neighborhood,
     boundary, padding, source, dest, switch, padval
 
 include("unordered_list.jl")

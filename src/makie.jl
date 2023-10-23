@@ -18,7 +18,7 @@ mutable struct MakieOutput{T,Fr<:AbstractVector{T},E,GC,RS<:Ruleset,Fi,A,PM,TI} 
 end
 function MakieOutput(f::Function, init::Union{NamedTuple,AbstractArray}; extent=nothing, store=false, kw...)
     # We have to handle some things manually as we are changing the standard output frames
-    extent = extent isa Nothing ? Extent(; init=init, kw...) : extent
+    extent = extent isa Nothing ? DG.Extent(; init=init, kw...) : extent
     # Build simulation frames from the output of `f` for empty frames
     if store
         frames = [deepcopy(init) for _ in DG.tspan(extent)]
@@ -71,7 +71,7 @@ function MakieOutput(;
     else
         frame_obs[] = map(DynamicGrids.gridview, DynamicGrids.grids(simdata))
     end
-    f(plotgrid, frame_obs)
+    f(plotgrid, t_obs, frame_obs)
 
     return output
 end

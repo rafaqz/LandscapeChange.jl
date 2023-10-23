@@ -1,7 +1,7 @@
 using LandscapeChange
 using NeutralLandscapes
 using DynamicGrids
-using DynamicGrids.Neighborhoods
+using Stencils
 using Rasters
 using Plots
 using Test
@@ -10,12 +10,12 @@ using StaticArrays
 @testset "NamedVector" begin
     c = NamedVector((forest=1, cleared=2, settled=3))
     using BenchmarkTools
-    NamedVector{(:a,:b,:c),3,Int}(NamedTuple{(:a,:b,:c)}((1,2,3)))
+    NamedVector{(:a,:b,:c),3,Int}((1,2,3))
     @btime NamedVector{(:a,:b,:c),3}((1.0,2,3))
     @btime NamedVector{(:a,:b,:c)}((1,2,3))
     # This doesn't completely compile away for some reason
-    @btime NamedVector{(:a,:b,:c),3}(NamedTuple{(:a,:b,:c)}((1,2,3)))
-    @code_warntype NamedVector(NamedTuple{(:a,:b,:c)}((1,2,3)))
+    @btime NamedVector{(:a,:b,:c),3}((1,2,3))
+    @time NamedVector(NamedTuple{(:a,:b,:c)}((1,2,3)))
     @btime map(x -> 2x, $c)
 end
 
