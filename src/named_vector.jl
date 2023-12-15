@@ -36,7 +36,6 @@ end
 @noinline _noidx_error(::T, k) where T = error("type $T has no field $(k)")
 
 Base.NamedTuple(a::NamedVector{K}) where K = NamedTuple{K}(Tuple(a)) 
-Base.NamedTuple(a::NamedVector{K}) where K = NamedTuple{K}(Tuple(a)) 
 # Base.pairs(a::NamedVector) = Base.pairs(NamedTuple(a))
 Base.zero(a::NamedVector) = map(x -> zero(x), a)
 Base.one(a::NamedVector) = map(x -> one(x), a)
@@ -45,18 +44,23 @@ Base.parent(a::NamedVector) = getfield(a, :val)
 Base.values(a::NamedVector) = values(parent(a))
 # Base.getproperty(a::NamedVector{K}, x::Symbol) where K = getproperty(NamedTuple{K}(parent(a)), x)
 Base.propertynames(a::NamedVector{K}) where K = K
-Base.keys(a::NamedVector{K}) where K = K
 Base.@propagate_inbounds Base.getindex(a::NamedVector, i::Int) = getindex(parent(a), i)
 Base.@propagate_inbounds Base.setindex!(a::NamedVector, x, i::Int) = (setindex!(parent(a), i, x); a)
 Base.@propagate_inbounds Base.setindex(a::NamedVector, x, i::Int) = (setindex(parent(a), i, x); a)
 Base.getindex(a::NamedVector, x::Symbol) = getproperty(a, x)
-Base.getindex(a::NamedVector, x::Tuple) = NamedVector(getindex(parent(a), x))
+Base.getindex(a::NamedVector, x::Tuple) = NamedVector(getindex(NamedTuple(a), x))
 # This is slow and apparently not needed
-# Base.map(f, a1::NamedVector{K,L}, as::NamedVector{K,L}...) where {K,L} = begin
-#     NamedVector{K,L}(map(f, map(SVector{L}, (a1, as...))...))
+# function Base.map(f, a1::NamedVector{K,L}, as::NamedVector...) where {K,L}
+#     map(as) do a
+#         K == keys(a) || _throw_nv_mismatch(K, keys(a))
+#     end
+#     NamedVector{K}(map(f, map(SVector{L}, (a1, as...))...))
 # end
 Base.show(io::IO, a::NamedVector) = Base.show(io, parent(a))
 Base.merge(a::NamedVector) = a
+
+@noinline _throw_nv_mismatch(K1, K2) = throw(ArgumentError("NamedVector `map`: keys $K1 not equal to keys $K2"))
+
 
 function DynamicGrids.ConstructionBase.constructorof(::Type{<:NamedVector{K,L,T}}) where {K,L,T}
     NamedVector{K,L,T}

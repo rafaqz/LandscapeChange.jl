@@ -49,7 +49,7 @@ function BottomUp{R,W}(;
     stencil,
     states,
     transitions,
-    logic=map(ts -> map(_ -> true, ts), transitions), # all true by default
+    logic,
     suitability,
     history,
     inertia=0.0,
@@ -65,7 +65,7 @@ function BottomUp{R,W}(;
     BottomUp{R,W}(stencil, states, transitions, logic, suitability, history, inertia, pressure, fixed, perturbation)
 end
 
-function DynamicGrids.applyrule(data, rule::BottomUp, current_state::T, I) where T<:Int64
+function DynamicGrids.applyrule(data, rule::BottomUp, current_state::T, I) where T<:Integer
     current_state == zero(current_state) && return current_state::T
     # Cells with fixed states dont change
     get(data, rule.fixed, I) && return current_state::T
@@ -80,10 +80,9 @@ function DynamicGrids.applyrule(data, rule::BottomUp, current_state::T, I) where
     suitabilities = get(data, rule.suitability, I)
     perturbation = get(data, rule.perturbation, I)
     inertias = get(data, rule.inertia, I)
-    α = rule.perturbation
 
     # Calculate transition probabilities for each active state
-    neighbor_weights = map(_ -> 0.0, rule.states)
+    neighbor_weights = map(_ -> 0.0, suitabilities)
     nbrs = neighbors(rule)
     dist_zones = distance_zones(rule)
     for i in 1:length(dist_zones)
@@ -103,26 +102,50 @@ function DynamicGrids.applyrule(data, rule::BottomUp, current_state::T, I) where
             values(rule.states),
             values(pressures),
         ) do weight, suitability, inertia, potential_state, pressure
-        # If we cant logically switch to this state return the typemin
-        i = findfirst(values(future_states))
-        # i isa Int || @show i future_states
-        rule.logic.indirect[i][potential_state] || return typemin(typeof(weight))
-        rule.logic.direct[potential_state][current_state] || return typemin(typeof(weight))
+        if potential_state != current_state 
+            # If we cant directly switch return the typemin
+            rule.logic.direct[potential_state][current_state] || return typemin(typeof(weight))
+            # But maybe we can switch indirectly
+            found = false
+            for (to, s) in enumerate(future_states)
+                s || continue
+                from = potential_state
+                if rule.logic.indirect[to][from] 
+                    found = true
+                end
+            end 
+            found || return typemin(typeof(weight))
+        end
+        # rule.logic.indirect[i][potential_state] || return typemin(typeof(weight))
+        # any(map(rule.logic.indirect) do ind
+            # any(ind[potential_state] .& future_states)
+        # end) || 
         # Define a stochastic disturbance term `v`
         # @fastmath v = 1.0 + (-log(rand()))^α
         # v = (1.0 + rand())::Float64
         # v = 1 + (rand() ^ 2 * rand((-1, 1))) * α
-        # noise = 0.5 + (rand()^5 * 2 - 1) * rule.perturbation
-        v = 1.0 + -log(rand()^rule.perturbation)
+        # v = 0.5 + (rand()^5 * 2 - 1) * rule.perturbation
+        
+        # noise = 1 + (rand()^5 * 2 - 1) * rule.perturbation
         # Inertia only applies when state == current_state
-        H = inertia * (potential_state == current_state)
-        return v * suitability * (1 + weight) * pressure + H 
+        # weight determines which cells will shift first
+        # pressure determines if any will shift at all
+        # weight mus always be less than inertia
+        if isinf(pressure)
+            return pressure
+        else
+            v = 1.0 + -log(rand()^rule.perturbation)
+            return v * weight * pressure + inertia * (potential_state == current_state)
+        end
+        # v * pressure
     end
+    # @show transition_potentials
 
     # The index with highest probability is the next state
     _, i = findmax(transition_potentials)
+    # i != current_state && @show i transition_potentials
     # Just set the cell to the next state now
-    return convert(Int, i)::Int64
+    return convert(T, i)::T
 end
 
 function DynamicGrids.modifyrule(rule::BottomUp{grid}, data) where grid
@@ -133,6 +156,7 @@ function DynamicGrids.modifyrule(rule::BottomUp{grid}, data) where grid
         pressure = rule.pressure(data, rule)
         @set! rule.pressure = pressure
     end
+    # @show pairs(NamedTuple(rule.pressure))
     @set rule.transitions = transitions_to_vectors(rule)
 end
 
@@ -140,17 +164,40 @@ function transitions_to_vectors(rule)
     dists = sort(union(distances(stencil(rule))))
     transitions = map(rule.transitions) do xs
         map(xs) do x
-            map(1:length(dists)) do i
+            map(dists) do d
                 if x isa Distributions.Distribution
                     # Normalised exponential
-                    Distributions.pdf(x, dists[i]) ./ Distributions.pdf(x, 0)
+                    Distributions.pdf(x, d) ./ Distributions.pdf(x, 0)
+                elseif x isa Function
+                    x(d)
                 else
                     x
                 end
             end |> SVector{length(dists)}
         end
     end
+    return transitions
 end
+
+function calc_pressure(leverage, current, predicted, allowed)
+    #leverage * (p - n)# / max(a, oneunit(a))
+    # 10 * sign(x) * log(abs(x))
+    # leverage * (p / n)
+    # leverage * max(1.0, predicted) / max(predicted - current, 1.0)#,  max(1.0, predicted) / smoothing)
+    needed = (predicted - current)
+    # if needed > 0
+        (leverage * needed / max(allowed, 1.0))
+    # else
+        # (leverage *  / max(allowed, 1.0))
+    # end
+end
+
+leverage = 10
+smoothing = 1
+current = 1000
+predicted = 4500
+allowed = 10000
+calc_pressure(leverage, current, predicted, allowed)
 
 # function DynamicGrids.validaterule(rule::BottomUp, data)
 #     get(data, rule.fixed, I) && return h
@@ -160,3 +207,5 @@ end
 #     inertia = get(data, rule.inertia, I)
 #     α = rule.perturbation
 # end
+
+
