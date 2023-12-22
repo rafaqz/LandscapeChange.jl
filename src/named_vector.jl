@@ -25,6 +25,7 @@ end
 NamedVector{K}(v::StaticVector{L,T}) where {K,L,T} = NamedVector{K,L}(v)
 NamedVector(; kw...) = NamedVector{keys(kw),length(kw)}(values(kw)) 
 
+
 Base.@assume_effects :foldable function Base.getproperty(nv::NamedVector{names}, k::Symbol) where names
     idx = findfirst(n -> k == n, names)
     if idx === nothing
@@ -38,6 +39,7 @@ end
 Base.NamedTuple(a::NamedVector{K}) where K = NamedTuple{K}(Tuple(a)) 
 # Base.pairs(a::NamedVector) = Base.pairs(NamedTuple(a))
 Base.zero(a::NamedVector) = map(x -> zero(x), a)
+# Base.zero(a::Type{<:NamedVector{K,L,T}}) where {K,L,T} = NamedVector{K}(ntuple(zero(T), L))   
 Base.one(a::NamedVector) = map(x -> one(x), a)
 Base.oneunit(a::NamedVector) = map(x -> oneunit(x), a)
 Base.parent(a::NamedVector) = getfield(a, :val)
@@ -49,6 +51,7 @@ Base.@propagate_inbounds Base.setindex!(a::NamedVector, x, i::Int) = (setindex!(
 Base.@propagate_inbounds Base.setindex(a::NamedVector, x, i::Int) = (setindex(parent(a), i, x); a)
 Base.getindex(a::NamedVector, x::Symbol) = getproperty(a, x)
 Base.getindex(a::NamedVector, x::Tuple) = NamedVector(getindex(NamedTuple(a), x))
+Base.convert(::Type{NamedVector}, nt::NamedTuple) = NamedVector(nt)
 # This is slow and apparently not needed
 # function Base.map(f, a1::NamedVector{K,L}, as::NamedVector...) where {K,L}
 #     map(as) do a

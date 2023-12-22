@@ -40,7 +40,7 @@ include("models/white_engalin.jl")
 include("analysis/neutral.jl")
 include("analysis/scores.jl")
 include("analysis/statistics.jl")
-include("input/logic.jl")
+include("input/transitions.jl")
 include("input/generate.jl")
 
 end

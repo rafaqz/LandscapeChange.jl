@@ -1,26 +1,19 @@
 
 """
-    compile_timeline(masks, categories; kw...)
+    compile_timeline(files, masks; categories)
 
 Generate 
 """
-function compile_timeline(masks, categories;
-    path="/home/raf/PhD/Mascarenes",
-    files = define_map_files(; path),
-    category_names=nothing,
-)
-    println("Generating raster slices...")
-    return _compile_timeline(masks, categories, files; category_names)
+function compile_timeline(file_lists, masks, names::Tuple)
+    compile_timeline(file_lists, masks, NamedTuple{names}(names))
 end
-
-function _compile_timeline(masks::NamedTuple, categories, file_list::NamedTuple; category_names)
-    # Load all rasters and make masks layers for all land-cover classes.
-    # We get the numbers form the saved ".json" file for the project.
-    map(file_list, masks[keys(file_list)]) do file_list, mask
-        _compile_timeline(mask, categories, file_list; category_names)
+function compile_timeline(file_lists::NamedTuple, masks::NamedTuple, names::NamedTuple)
+    map(masks, file_lists) do m, f
+        compile_timeline(f, m, names)
     end
 end
-function _compile_timeline(mask::AbstractArray, categories, file_list::NamedTuple{Keys}; category_names) where Keys
+function compile_timeline(file_list::NamedTuple{Keys}, mask::Raster, names::NamedTuple) where Keys
+    println("Generating raster slices...")
     forced = []
     files = map(file_list, NamedTuple{Keys}(Keys)) do (image_path, data), key
         raster_path = splitext(image_path)[1] * ".tif"
@@ -35,10 +28,10 @@ function _compile_timeline(mask::AbstractArray, categories, file_list::NamedTupl
             throw(ArgumentError("Error at file key $key: $(data[1]) is not a valid specification value"))
         end
         times = _get_times(categories)
-        specification = _as_namedtuples(categories, category_names, times)
+        specification = _format_timeline(categories, names, times)
         # Gapfill NamedTuples with nothing
-        grouped = map(specification) do (time, categories)
-            _category_raster(raw, original_names, categories, mask, forced, time)
+        grouped = map(specification) do (time, cats)
+            _category_raster(raw, original_names, cats, mask, forced, time)
         end
         (; raw, grouped, times, specification, original_names)
     end
@@ -83,19 +76,19 @@ function _compile_timeline(mask::AbstractArray, categories, file_list::NamedTupl
     end
 end
 
-function _category_raster(raster::Raster, layer_names::Vector, layers::NamedTuple{Keys}, mask, forced, time) where Keys
-    map(layers, NamedTuple{Keys}(Keys)) do layer, key
-        _category_raster(raster, layer_names, layer, mask, forced, time, key)
+function _category_raster(raster::Raster, layer_names::Vector, categories::NamedTuple{Keys}, mask, forced, time) where Keys
+    map(categories, NamedTuple{Keys}(Keys)) do category, key
+        _category_raster(raster, layer_names, category, mask, forced, time, key)
     end
 end
-function _category_raster(raster::Raster, layer_names::Vector, layer_components::Vector, mask, forced, time, key)::Raster{Bool}
-    layers = map(l -> _category_raster(raster, layer_names, l, mask, forced, time, key), layer_components)
+function _category_raster(raster::Raster, layer_names::Vector, category_components::Vector, mask, forced, time, key)::Raster{Bool}
+    layers = map(l -> _category_raster(raster, layer_names, l, mask, forced, time, key), category_components)
     out = rebuild(Bool.(broadcast(|, layers...)); missingval=false) .& mask
     @assert missingval(out) == false
     return out
 end
-function _category_raster(raster::Raster, layer_names::Vector, xs::Tuple{<:Function,Vararg}, mask, forced, time, key)::Raster{Bool}
-    f, args... = xs
+function _category_raster(raster::Raster, layer_names::Vector, categoryfunc::Tuple{<:Function,Vararg}, mask, forced, time, key)::Raster{Bool}
+    f, args... = categoryfunc
     vals = map(args) do layer
         _category_raster(raster, layer_names, layer, mask, forced, time, key)
     end
@@ -150,9 +143,9 @@ function _get_times(categories)
     return sort!(collect(times))
 end
 
-function _as_namedtuples(categories::NamedTuple, category_names, times)
+function _format_timeline(categories::NamedTuple, names, times)
     map(times) do time
-        time => map(category_names) do k
+        time => map(names) do k
             haskey(categories, k) || return nothing
             category = categories[k]
             if category isa Pair
