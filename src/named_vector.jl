@@ -9,6 +9,7 @@ NamedVector{K,L,T,V}(x1::T, x2::T, xs::T...) where {K,L,T,V} = NamedVector{K,L,T
 NamedVector{K,L,T}(t::V) where {K,L,T,V<:Tuple} = NamedVector{K,L,T,V}(t)
 NamedVector{K,L,T}(t::V) where {K,L,T,V<:NamedTuple{K,V1}} where V1 = NamedVector{K,L,T,V1}(t)
 NamedVector(val::NamedTuple{K,V}) where {K,V<:Tuple{Vararg{Any,L}}} where L = NamedVector{K,L}(val)
+NamedVector(val::NamedVector) = val
 NamedVector{K}(t::V) where {K,V<:Tuple{Vararg{<:Any,L}}} where L = NamedVector{K,L}(t)
 # Type promotion step...
 function NamedVector{K,L}(t::V) where {K,L,V<:Tuple{Vararg{<:Any,L}}}
@@ -23,6 +24,7 @@ function NamedVector{K,L}(v::V) where {V <: StaticVector{L,T}} where {K,L,T}
     NamedVector{K,L,T,V}(v)
 end
 NamedVector{K}(v::StaticVector{L,T}) where {K,L,T} = NamedVector{K,L}(v)
+NamedVector{K}(v::AbstractVector{T}) where {K,T} = NamedVector{K}(StaticVector{length(K),T}(v))
 NamedVector(; kw...) = NamedVector{keys(kw),length(kw)}(values(kw)) 
 
 
@@ -78,6 +80,8 @@ Base.merge(a::NamedTuple, b::NamedVector, args...) =
 
 StaticArrays.similar_type(::Type{A}, ::Type{T}, S::Size) where {T,A<:NamedVector} =
     _namedvector_similar_size(A, T, S, Size(A))
+
+StaticArrays.Size(::Type{<:NamedVector{K}}) where K = StaticArrays.Size(length(K))
 
 function _namedvector_similar_size(
     A::Type{<:NamedVector{K,L}}, ::Type{T}, NewSize::S, OldSize::S
