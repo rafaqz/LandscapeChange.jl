@@ -147,67 +147,116 @@ function cross_validate_timeline!(pixel_timeline, transitions;
     cull=true, 
     fill_only=false,
 )
-    rev = lastindex(pixel_timeline):-1:1
+    rev = lastindex(pixel_timeline):-1:firstindex(pixel_timeline)
     if fill_only
         _fill_empty_times!(pixel_timeline)
     else
         # Forward
-        _apply_transitions!(forward, reversed, reversed_indirect)
+        apply_transitions!(forward, reversed, reversed_indirect)
         # Backwards
-        _apply_transitions!(view(backward, rev), transitions, indirect)
+        apply_transitions!(view(backward, rev), transitions, indirect)
+        apply_both_transitions!(view(backward, rev), transitions, indirect, reversed, reversed_indirect)
 
-        if simplify
-            # _remove_intermediate_uncertainty!(forward, pixel_timeline, possible, transitions, reversed, indirect, reversed_indirect)
-            # _remove_intermediate_uncertainty!(view(backward, rev), view(pixel_timeline, rev), view(possible, rev), reversed, transitions, reversed_indirect, indirect)
-            _remove_intermediate_uncertainty!(forward)
-            _remove_intermediate_uncertainty!(view(backward, rev))
-        end
+        # if simplify
+            # minimise_uncertainty!(forward, pixel_timeline, possible, transitions, reversed, indirect, reversed_indirect)
+            # minimise_uncertainty!(view(backward, rev), view(pixel_timeline, rev), view(possible, rev), reversed, transitions, reversed_indirect, indirect)
+            # minimise_uncertainty!(forward)
+            # minimise_uncertainty!(view(backward, rev))
+        # end
 
         for i in eachindex(possible)
             f, b = forward[i], backward[i]
-            x = map(&, f, b)
-            possible[i] = any(x) ? x : map(|, f, b)
+            possible[i] = map(|, f, b)
         end
+        # _fill_empty_times!(possible)
 
-        if cull
-            # Forward
-            _apply_transitions!(forward, pixel_timeline, possible, reversed, reversed_indirect)
-            # Backwards
-            _apply_transitions!(view(backward, rev), view(pixel_timeline, rev), view(possible, rev), transitions, indirect)
+        # if cull
+        #     # Forward
+        #     cull_transitions!(forward, pixel_timeline, possible, reversed, reversed_indirect)
+        #     # Backwards
+        #     cull_transitions!(view(backward, rev), view(pixel_timeline, rev), view(possible, rev), transitions, indirect)
+        # end
 
-            for i in eachindex(possible)
-                f, b = forward[i], backward[i]
-                x = map(&, f, b)
-                possible[i] = any(x) ? x : map(|, f, b)
-            end
-        end
-        if any(force)
-            for i in eachindex(possible)
-                x = map(&, force, possible[i])
-                if any(x)
-                    possible[i] = x
-                end
-            end
-        end
+        # if simplify
+        #     minimise_uncertainty!(forward, pixel_timeline, possible, transitions, reversed, indirect, reversed_indirect)
+        #     minimise_uncertainty!(view(backward, rev), view(pixel_timeline, rev), view(possible, rev), reversed, transitions, reversed_indirect, indirect)
+        # end
 
+        # if any(force)
+        #     for i in eachindex(possible)
+        #         x = map(&, force, possible[i])
+        #         if any(x)
+        #             possible[i] = x
+        #         end
+        #     end
+        # end
 
         # Finalise output
         for i in eachindex(pixel_timeline)
-            before = pixel_timeline[i]
-            after = possible[i]
+            pixel_timeline[i] = possible[i]
+            # before = pixel_timeline[i]
+            # after = possible[i]
             # Any shared state is enough to say there was no error
-            shared = map(&, before, after)
+            # shared = map(&, before, after)
             # Write errors
-            if !any(shared)
-                pixel_error[i] = before
-            end
+            # if !any(shared)
+                # pixel_error[i] = before
+            # end
             # Write timeline
-            pixel_timeline[i] = after
+            # pixel_timeline[i] = after
         end
     end
 
     return pixel_timeline, pixel_error
 end
+
+function apply_transitions!(
+    timeline::AbstractArray{<:NamedVector{K}}, 
+    transitions::NamedVector{K}, 
+    indirect::NamedVector{K},
+) where K
+    a = first(timeline)
+    for i in firstindex(timeline)+1:lastindex(timeline)
+        b = timeline[i]
+        if any(b)
+            a, match = merge_all(a, b, transitions, indirect)
+            timeline[i] = a
+        end
+    end
+    return timeline
+end
+
+function apply_both_transitions!(
+    timeline::AbstractArray{<:NamedVector{K}}, 
+) where K
+
+    logic = (; transitions, indirect, reversed, reversed_indirect)
+    lower = upper = (;
+        forced = zero(first(timeline)),
+        uncertain = zero(first(timeline)),
+    )
+    i = firstindex(timeline)
+    j = lastindex(timeline)
+    _combine!(timeline, logic, lower, upper, i, j)
+    return timeline
+end
+
+function _combine!(timeline, logic, lower, upper, i, j)
+    if i > j 
+        uncertain = lower.uncertain
+        uncertain = lower.uncertain
+        return newlower, newupper
+    end
+    tl = timeline[i]
+    tu = timeline[j]
+    if any(tl)
+        innerlower, innerupper = _combine!(timeline, logic, lower, upper, i+1, j-1)
+    end
+    timeline[i] = 
+    timeline[j] = 
+    return newlower, newupper
+end
+
 
 # Fill empty slices with previous data
 function _fill_empty_times!(timeline::AbstractVector)
@@ -229,77 +278,91 @@ function _fill_empty_times!(timeline::AbstractVector)
     end
 end
 
-function _remove_intermediate_uncertainty!(timeline)
-    bitmasks = _bitmasks(first(timeline))
-    singles = zero(first(timeline))
-    lastsingle_i = firstindex(timeline)
-    for i in eachindex(timeline)
-        x = timeline[i]
-        if count(x) == 1
-            singles = map(|, singles, x)
-            # Only keep states that where alone somewhere
-            for i in lastsingle_i+1:i-1
-                timeline[i] = timeline[i] .& singles
-            end
-            lastsingle_i = i
+# function minimise_uncertainty!(timeline)
+#     bitmasks = generate_bitmasks(first(timeline))
+#     singles = zero(first(timeline))
+#     lastsingle_i = firstindex(timeline)
+#     for i in eachindex(timeline)
+#         x = timeline[i]
+#         if count(x) == 1
+#             singles = map(|, singles, x)
+#             # Only keep states that where alone somewhere
+#             for i in lastsingle_i+1:i-1
+#                 timeline[i] = timeline[i] .& singles
+#             end
+#             lastsingle_i = i
+#         end
+#     end
+#     rev = lastindex(timeline):-1:firstindex(timeline)
+#     simplify_end!(timeline)
+#     simplify_end!(view(timeline, rev))
+#     return timeline
+# end
+
+# function minimise_uncertainty!(
+#     timeline::AbstractVector{<:NamedVector}, known::AbstractVector{<:NamedVector}, possible::AbstractVector{<:NamedVector}, transitions, reversed, indirect, reversed_indirect
+# )
+#     past = first(known)
+#     last_single_i = typemax(Int)
+#     last_single_categories = zeros(eltype(timeline))
+
+#     for i in eachindex(known)
+#         known_categories = known[i]
+#         # Only proceed if we have got to a single category, or the end
+#         count(known_categories) == 1 || continue
+#         current_categories = timeline[i]
+#         if last_single_i < (i - 1)
+#             # the present category as one of the possibilities
+#             fillrange = last_single_i+1:i-1
+#             # Replace the intermediate uncertain categories
+#             for n in fillrange
+#                 categories_at_n = possible[n]
+#                 shared = map(&, last_single_categories, categories_at_n, current_categories)
+#                 if any(shared)
+#                     timeline[n] = shared
+#                     if count(shared) == 1
+#                         last_single_categories = shared
+#                         last_single_i = n
+#                     end
+#                 else # Check possible direct transitions
+#                     cats = merge_all(last_single_categories, categories_at_n, reversed, reversed_indirect)
+#                     possible_direct = merge_all(current_categories, cats, transitions, indirect)
+#                     if any(possible_direct)
+#                         timeline[n] = possible_direct
+#                     else # Check possible indirect transitions
+#                         cats_indirect = merge_all(last_single_categories, categories_at_n, reversed_indirect, reversed)
+#                         possible_indirect = merge_all(current_categories, cats_indirect, indirect, transitions)
+#                         # Here we nuke impossible intermediate values
+#                         timeline[n] = possible_indirect
+#                     end
+#                 end
+#             end
+#         end
+#         last_single_i = i
+#         last_single_categories = current_categories
+#     end
+
+#     # rev = lastindex(timeline):-1:firstindex(timeline)
+#     # simplify_end!(timeline)
+#     # simplify_end!(view(timeline, rev))
+
+#     return timeline
+# end
+
+Base.@assume_effects :foldable function minimise_uncertainty!(
+    timeline::AbstractVector{<:NamedVector{K}}, known::AbstractVector{<:NamedVector}, possible::AbstractVector{<:NamedVector}, transitions, reversed, indirect, reversed_indirect
+) where K
+    map(K) do k 
+        for i in eachindex(timeline)
         end
     end
-    _simplify_end!(timeline)
-    return timeline
 end
 
-function _remove_intermediate_uncertainty!(
-    dest::AbstractVector, known, possible, transitions, reversed, indirect, reversed_indirect
-)
-    past = first(known)
-    last_single_i = typemax(Int)
-    last_single_categories = zeros(eltype(dest))
-    for i in eachindex(known)
-        known_categories = known[i]
-        # Only proceed if we have got to a single category, or the end
-        count(known_categories) == 1 || continue
-        if last_single_i < (i - 1)
-            # the present category as one of the possibilities
-            fillrange = last_single_i+1:i-1
-            for n in fillrange
-                possible[n]
-            end
-            # Replace the intermediate uncertain categories
-            for n in fillrange
-                categories_at_n = possible[n]
-                shared = map(&, last_single_categories, categories_at_n, current_categories)
-                if any(shared)
-                    timeline[n] = shared
-                    if count(shared) == 1
-                        last_single_categories = shared
-                        last_single_i = n
-                    end
-                else # Check possible direct transitions
-                    cats = _merge_all_possible(last_single_categories, categories_at_n, reversed)
-                    possible = _merge_all_possible(current_categories, cats, transitions)
-                    if any(possible)
-                        timeline[n] = possible
-                    else # Check possible indirect transitions
-                        cats_indirect = _merge_all_possible(last_single_categories, categories_at_n, reversed_indirect)
-                        possible_indirect = _merge_all_possible(current_categories, cats_indirect, indirect)
-                        # Here we nuke impossible intermediate values
-                        timeline[n] = possible_indirect
-                    end
-                end
-            end
-        end
-        last_single_i = i
-        last_single_categories = current_categories
-    end
-
-    # _simplify_end!(timeline)
-
-    return timeline
-end
+const LOG = []
 
 # At the end assume nothing changes from the previous 
 # step unless there are no shared categories
-function _simplify_end!(timeline)
+function simplify_end!(timeline)
     count(timeline[end]) > 1 || return timeline
     i = lastindex(timeline)
     while i > 0
@@ -319,51 +382,40 @@ function _simplify_end!(timeline)
     return timeline
 end
 
-function _apply_transitions!(
-    timeline::AbstractArray{<:NamedVector{K}}, 
-    transitions::NamedVector{K}, indirect::NamedVector{K},
-) where K
-    a = first(timeline)
-    for i in firstindex(timeline)+1:lastindex(timeline)
-        b = timeline[i]
-        a = _merge_all(a, b, transitions, indirect)
-        timeline[i] = a
-    end
-    return timeline
-end
-
-function _apply_transitions!(
+function cull_transitions!(
     timeline::AbstractArray{<:NamedVector{K}}, 
     known::AbstractArray{<:NamedVector{K}}, 
     possible::AbstractArray{<:NamedVector{K}}, 
-    transitions::NamedVector{K}, indirect::NamedVector{K},
+    transitions::NamedVector{K}, 
+    indirect::NamedVector{K},
 ) where K
     timeline[1] = a = map(&, first(known), first(possible))
     for i in firstindex(timeline)+1:lastindex(timeline)
         b = map(&, known[i], possible[i])
-        a = _merge_all(a, b, transitions, indirect)
+        a, match = merge_all(a, b, transitions, indirect)
         timeline[i] = a
     end
     return timeline
 end
 
-Base.@assume_effects :foldable function _merge_all(
+Base.@assume_effects :foldable function merge_all(
     source::NamedVector{K}, dest::NamedVector{K}, 
     transitions::NamedVector{K}, indirect::NamedVector{K},
 ) where K
     any(source) || return dest
-    bitmasks = _bitmasks(source)
-    reduce(zip(source, transitions, indirect, bitmasks); init=zero(source)) do acc, (s, direct_dest, indirect_dest, bitmask)
+    bitmasks = generate_bitmasks(source)
+    reduce(zip(source, transitions, indirect, bitmasks); init=(zero(source), true)) do (acc, match), (s, direct_dest, indirect_dest, bitmask)
         x = if s
-            dir = map(&, dest, direct_dest)
-            xs = if any(dir) 
-                dir
+            direct = map(&, dest, direct_dest)
+            xs = if any(direct) 
+                direct
             else
-                ind = map(&, dest, indirect_dest)
-                if any(ind) 
-                    ind
+                indirect = map(&, dest, indirect_dest)
+                if any(indirect) 
+                    indirect
                 else
-                    # Broken logic: keep this category
+                    # Broken logic: keep this category, unmatch
+                    match = false
                     bitmask
                 end
             end
@@ -371,25 +423,11 @@ Base.@assume_effects :foldable function _merge_all(
         else
             acc
         end
-        return x
+        return x, match
     end
 end
 
-# Base.@assume_effects :foldable function _merge_all_possible(
-#     source::NamedVector{K}, dest::NamedVector{K}, transitions::NamedVector{K},
-# ) where K
-#     any(source) || return dest
-#     reduce(zip(source, transitions); init=zero(source)) do acc, (s, direct_dest)
-#         x = if s
-#             map(|, map(&, dest, direct_dest), acc)
-#         else
-#             acc
-#         end
-#         return x
-#     end
-# end
-
-@generated function _bitmasks(::NamedVector{K}) where K
+@generated function generate_bitmasks(::NamedVector{K}) where K
     nvs = ntuple(length(K)) do i
         vals = falses(length(K))
         vals[i] = true 
