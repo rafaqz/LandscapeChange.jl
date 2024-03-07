@@ -255,8 +255,8 @@ function _combine!(timeline, logic, lower, upper, i, j)
     upper_forced = ctu == 1
 
     # @show lower upper 
-    @show tl tu
-    @show ctl ctu 
+    # @show tl tu
+    # @show ctl ctu 
     # Update the forced and uncertain categories based on the current values
     if lower_forced # We have 1 certain category: update forced and remove uncertain
         forced, match = merge_forced(tl, lower.forced, logic.transitions, logic.indirect) 
@@ -281,7 +281,7 @@ function _combine!(timeline, logic, lower, upper, i, j)
         uncertain, match = merge_uncertain(tu, upper.uncertain, logic.transitions, logic.indirect) 
         upper = (; forced, uncertain) 
     end
-    @show lower upper
+    # @show lower upper
 
     # Recursively move inwards in the timeline
     innerlower, innerupper = _combine!(timeline, logic, lower, upper, i+1, j-1)
@@ -289,46 +289,59 @@ function _combine!(timeline, logic, lower, upper, i, j)
     # Update the timeline with combined values from forwards/backwards passes
     
     println()
-    @show any(innerlower.forced) lower_forced
+    # @show any(innerlower.forced) lower_forced
     if any(innerlower.forced)
-        @show "innerlower forced"
+        # @show "innerlower forced"
         if lower_forced
             finallower, match = merge_forced(innerlower.forced, tl, logic.transitions, logic.indirect)
+            returnlower = (forced=finallower, uncertain=zero(finallower))
         else
-            finallower, match = merge_uncertain(innerlower.forced, tl, logic.transitions, logic.indirect)
+            finallower, match = merge_forced(innerlower.forced, tl, logic.transitions, logic.indirect)
+            if count(finallower) == 1
+                returnlower = (forced=finallower, uncertain=zero(finallower))
+            else
+                returnlower = (forced=innerlower.forced, uncertain=finallower)
+            end
         end
-        returnlower = (forced=finallower, uncertain=zero(finallower))
     else
-        @show "innerlower uncertain"
+        # @show "innerlower uncertain"
         if lower_forced
             finallower, match = merge_forced(innerlower.uncertain, tl, logic.transitions, logic.indirect)
+            returnlower = (forced = tl, uncertain=finallower)
         else
             finallower, match = merge_uncertain(innerlower.uncertain, tl, logic.transitions, logic.indirect)
+            returnlower = (forced = zero(finallower), uncertain=finallower)
         end
-        returnlower = (forced = zero(finallower), uncertain=finallower)
     end
 
     println()
-    @show any(innerupper.forced) upper_forced
+    # @show any(innerupper.forced) upper_forced
     if any(innerupper.forced) 
-        @show "innerupper forced"
+        # @show "innerupper forced"
         if upper_forced
             finalupper, match = merge_forced(innerupper.forced, tu, logic.reversed, logic.reversed_indirect)
+            # @show innerupper.forced tu finalupper logic.reversed
+            returnupper = (forced=finalupper, uncertain=zero(finalupper))
         else
             finalupper, match = merge_uncertain(innerupper.forced, tu, logic.reversed, logic.reversed_indirect)
+            if count(finalupper) == 1
+                returnupper = (forced=finalupper, uncertain=zero(finalupper))
+            else
+                returnupper = (forced=innerupper.forced, uncertain=finalupper)
+            end
         end
-        returnupper = (forced = zero(finalupper), uncertain=finalupper)
     else
-        @show "innerupper uncertain"
+        # @show "innerupper uncertain"
         if upper_forced
             finalupper, match = merge_uncertain(innerupper.uncertain, tu, logic.reversed, logic.reversed_indirect)
+            returnupper = (forced=tu, uncertain=finalupper)
         else
             finalupper, match = merge_uncertain(innerupper.uncertain, tu, logic.reversed, logic.reversed_indirect)
+            returnupper = (forced=zero(finalupper), uncertain=finalupper)
         end
-        returnupper = (forced = zero(finalupper), uncertain=finalupper)
     end
     println()
-    @show finallower finalupper
+    # @show finallower finalupper
     println()
     # Update timeline to the best combined 
     # values from forward and backawards pass
@@ -362,7 +375,8 @@ Base.@assume_effects :foldable function merge_uncertain(
                     indirect
                 else
                     @warn "Broken logic in merge_uncertain: keep this category, unmatch"
-                    @show source dest
+                    # @show source dest
+                    @show bitmask
                     match = false
                     bitmask
                 end
@@ -387,6 +401,7 @@ Base.@assume_effects :foldable function merge_forced(
     ) do (acc, match), (s, direct_dest, indirect_dest, bitmask)
         x = if s
             direct = map(&, dest, direct_dest)
+            # @show source dest direct_dest direct
             xs = if any(direct) 
                 direct
             else
@@ -397,7 +412,7 @@ Base.@assume_effects :foldable function merge_forced(
                     @warn "Broken logic in merge_forced: merging"
                     # Broken logic: keep this category, unmatch
                     match = false
-                    map(|, source, dest)
+                    map(|, bitmask, dest)
                 end
             end
             map(|, xs, acc)

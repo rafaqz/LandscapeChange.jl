@@ -24,6 +24,15 @@ using LandscapeChange: apply_both_transitions!
         (true, false, false, false, false, false)
         (true, false, false, false, false, false)
     ])
+    timeline = NV{k}.([
+        (false, true, false, false, false, true)
+        (true, true,  false, true, true, false)
+    ])
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test result == NV{k}.([
+        (false, true, false, false, false, false)
+        (false, true, false, false, false, false)
+    ])
     end
 
     @testset "Uncertainty simplifies to certainty" begin
@@ -115,6 +124,52 @@ using LandscapeChange: apply_both_transitions!
     @test result == NV{k}.([
         (false, false, true, true, false, false)
         (false, true,  false, false, false, true)
+    ])
+    end
+
+    @testset "Multiple lines" begin
+    timeline = NV{k}.([
+        (false, false, false, false, false, true)
+        (true, false, false, false, false, false)
+        (false, true, false, false, false, false)
+    ])
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test result == NV{k}.([
+        (true, false, false, false, false, true)
+        (true, false, false, false, false, true)
+        (false, true, false, false, false, true)
+    ])
+    timeline = NV{k}.([
+        (true, false, false, false, false, false)
+        (true, false, false, false, false, false)
+        (false, true, true, false, false, false)
+        (false, true, false, false, true, false)
+        (false, true, true, false, false, false)
+    ])
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test result == NV{k}.([
+        (true, false, false, false, false, false)
+        (true, false, false, false, false, false)
+        (false, true, false, false, false, false)
+        (false, true, false, false, false, false)
+        (false, true, false, false, false, false)
+    ])
+    timeline = NV{k}.([
+        (true, false, false, false, true, false)
+        (false, false, false, false, false, true)
+        (true, false, false, false, false, false)
+        (false, true, true, false, false, false)
+        (false, true, false, false, true, false)
+        (false, true, true, false, false, false)
+    ])
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test_broken result == NV{k}.([
+        (true, false, false, false, true, false)
+        (true, false, false, false, false, true)
+        (true, false, false, false, false, true)
+        (false, true, false, false, false, true)
+        (false, true, false, false, false, true)
+        (false, true, false, false, false, true)
     ])
     end
 end
