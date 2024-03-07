@@ -226,11 +226,11 @@ function apply_transitions!(
     return timeline
 end
 
+
 function apply_both_transitions!(
     timeline::AbstractArray{<:NamedVector{K}}, 
+    logic::NamedTuple,# = (; transitions, indirect, reversed, reversed_indirect)
 ) where K
-
-    logic = (; transitions, indirect, reversed, reversed_indirect)
     lower = upper = (;
         forced = zero(first(timeline)),
         uncertain = zero(first(timeline)),
@@ -243,40 +243,190 @@ end
 
 function _combine!(timeline, logic, lower, upper, i, j)
     if i > j 
-        uncertain = lower.uncertain
-        uncertain = lower.uncertain
-        return newlower, newupper
+        return upper, lower
     end
+
+    # Get the current timeline values
     tl = timeline[i]
     tu = timeline[j]
-    if any(tl)
-        innerlower, innerupper = _combine!(timeline, logic, lower, upper, i+1, j-1)
+    ctl = count(tl) 
+    ctu = count(tu) 
+    lower_forced = ctl == 1
+    upper_forced = ctu == 1
+
+    # @show lower upper 
+    @show tl tu
+    @show ctl ctu 
+    # Update the forced and uncertain categories based on the current values
+    if lower_forced # We have 1 certain category: update forced and remove uncertain
+        forced, match = merge_forced(tl, lower.forced, logic.transitions, logic.indirect) 
+        uncertain = zero(lower.uncertain)
+        lower = (; forced, uncertain)
+    elseif ctl != 0 # We have multiple uncertain categories: update uncertain
+        # forced, match = merge_forced(tu, lower.forced, logic.transitions, logic.indirect) 
+        forced = lower.forced
+        uncertain, match = merge_uncertain(tl, lower.uncertain, logic.reversed, logic.reversed_indirect) 
+        lower = (; forced, uncertain) 
     end
-    timeline[i] = 
-    timeline[j] = 
-    return newlower, newupper
+    if upper_forced # We have 1 certain category: update forced and remove uncertain
+        # TODO what if uncertain cant convert to certain
+        forced, match = merge_forced(tu, upper.forced, logic.transitions, logic.indirect) 
+        uncertain = zero(upper.uncertain) # No uncertainty
+        upper = (; forced, uncertain)
+    elseif ctu != 0 # We have multiple uncertain categories: update uncertain
+        # Existing forced states continue
+        # forced, match = merge_forced(tu, lower.forced, logic.transitions, logic.indirect) 
+        forced = upper.forced
+        # Merge uncertain states over transitions
+        uncertain, match = merge_uncertain(tu, upper.uncertain, logic.transitions, logic.indirect) 
+        upper = (; forced, uncertain) 
+    end
+    @show lower upper
+
+    # Recursively move inwards in the timeline
+    innerlower, innerupper = _combine!(timeline, logic, lower, upper, i+1, j-1)
+
+    # Update the timeline with combined values from forwards/backwards passes
+    
+    println()
+    @show any(innerlower.forced) lower_forced
+    if any(innerlower.forced)
+        @show "innerlower forced"
+        if lower_forced
+            finallower, match = merge_forced(innerlower.forced, tl, logic.transitions, logic.indirect)
+        else
+            finallower, match = merge_uncertain(innerlower.forced, tl, logic.transitions, logic.indirect)
+        end
+        returnlower = (forced=finallower, uncertain=zero(finallower))
+    else
+        @show "innerlower uncertain"
+        if lower_forced
+            finallower, match = merge_forced(innerlower.uncertain, tl, logic.transitions, logic.indirect)
+        else
+            finallower, match = merge_uncertain(innerlower.uncertain, tl, logic.transitions, logic.indirect)
+        end
+        returnlower = (forced = zero(finallower), uncertain=finallower)
+    end
+
+    println()
+    @show any(innerupper.forced) upper_forced
+    if any(innerupper.forced) 
+        @show "innerupper forced"
+        if upper_forced
+            finalupper, match = merge_forced(innerupper.forced, tu, logic.reversed, logic.reversed_indirect)
+        else
+            finalupper, match = merge_uncertain(innerupper.forced, tu, logic.reversed, logic.reversed_indirect)
+        end
+        returnupper = (forced = zero(finalupper), uncertain=finalupper)
+    else
+        @show "innerupper uncertain"
+        if upper_forced
+            finalupper, match = merge_uncertain(innerupper.uncertain, tu, logic.reversed, logic.reversed_indirect)
+        else
+            finalupper, match = merge_uncertain(innerupper.uncertain, tu, logic.reversed, logic.reversed_indirect)
+        end
+        returnupper = (forced = zero(finalupper), uncertain=finalupper)
+    end
+    println()
+    @show finallower finalupper
+    println()
+    # Update timeline to the best combined 
+    # values from forward and backawards pass
+    timeline[i] = finallower
+    timeline[j] = finalupper
+
+    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values
+    return returnlower, returnupper
 end
 
+Base.@assume_effects :foldable function merge_uncertain(
+    source::NamedVector{K}, dest::NamedVector{K}, 
+    transitions::NamedVector{K}, indirect::NamedVector{K},
+) where K
+    # Handle completely missing values
+    any(source) || return dest, true
+    any(dest) || return source, true
+    # First see if they share values already and assume continuity
+    shared = map(&, source, dest)
+    any(shared) && return shared, true
+    # Otherwise find all possible transitions between uncertain states
+    bitmasks = generate_bitmasks(source)
+    reduce(zip(source, transitions, indirect, bitmasks); init=(zero(source), true)) do (acc, match), (s, direct_dest, indirect_dest, bitmask)
+        x = if s
+            direct = map(&, dest, direct_dest)
+            xs = if any(direct) 
+                direct
+            else
+                indirect = map(&, dest, indirect_dest)
+                if any(indirect) 
+                    indirect
+                else
+                    @warn "Broken logic in merge_uncertain: keep this category, unmatch"
+                    @show source dest
+                    match = false
+                    bitmask
+                end
+            end
+            map(|, xs, acc)
+        else
+            acc
+        end
+        return x, match
+    end
+end
+
+Base.@assume_effects :foldable function merge_forced(
+    source::NamedVector{K}, dest::NamedVector{K}, 
+    transitions::NamedVector{K}, indirect_transitions::NamedVector{K},
+) where K
+    any(source) || return dest, true
+    any(dest) || return source, true
+    bitmasks = generate_bitmasks(source)
+    reduce(zip(source, transitions, indirect_transitions, bitmasks); 
+        init=(zero(source), true)
+    ) do (acc, match), (s, direct_dest, indirect_dest, bitmask)
+        x = if s
+            direct = map(&, dest, direct_dest)
+            xs = if any(direct) 
+                direct
+            else
+                indirect = map(&, dest, indirect_dest)
+                if any(indirect) 
+                    indirect
+                else
+                    @warn "Broken logic in merge_forced: merging"
+                    # Broken logic: keep this category, unmatch
+                    match = false
+                    map(|, source, dest)
+                end
+            end
+            map(|, xs, acc)
+        else
+            acc
+        end
+        return x, match
+    end
+end
 
 # Fill empty slices with previous data
-function _fill_empty_times!(timeline::AbstractVector)
-    last_non_empty_i = typemax(Int)
-    last_non_empty_categories = zero(eltype(timeline))
-    for i in eachindex(timeline)
-        present_categories = timeline[i]
-        any(present_categories) || continue # No category data for this time slice
-        if last_non_empty_i < (i - 1)
-            # There has been a gap in data, fill it with the combination of
-            # the last non empty categories and the present category
-            fill_categories = map(|, last_non_empty_categories, present_categories)
-            for n in last_non_empty_i+1:i-1
-                timeline[n] = fill_categories
-            end
-        end
-        last_non_empty_i = i
-        last_non_empty_categories = present_categories
-    end
-end
+# function _fill_empty_times!(timeline::AbstractVector)
+#     last_non_empty_i = typemax(Int)
+#     last_non_empty_categories = zero(eltype(timeline))
+#     for i in eachindex(timeline)
+#         present_categories = timeline[i]
+#         any(present_categories) || continue # No category data for this time slice
+#         if last_non_empty_i < (i - 1)
+#             # There has been a gap in data, fill it with the combination of
+#             # the last non empty categories and the present category
+#             fill_categories = map(|, last_non_empty_categories, present_categories)
+#             for n in last_non_empty_i+1:i-1
+#                 timeline[n] = fill_categories
+#             end
+#         end
+#         last_non_empty_i = i
+#         last_non_empty_categories = present_categories
+#     end
+# end
 
 # function minimise_uncertainty!(timeline)
 #     bitmasks = generate_bitmasks(first(timeline))

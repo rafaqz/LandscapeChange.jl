@@ -10,7 +10,7 @@ transitions = NV(
     abandoned = NV(native=false, cleared=true,  abandoned=true,  urban=false,  forestry=false,  water=false),
     urban     = NV(native=true,  cleared=true,  abandoned=true,  urban=true,  forestry=false,  water=false),
     forestry  = NV(native=true,  cleared=true,  abandoned=true,  urban=false, forestry=true,   water=false),
-    water     = NV(native=true,  cleared=true,  abandoned=true,  urban=true,  forestry=false,  water=true),
+    water     = NV(native=true,  cleared=true,  abandoned=true,  urban=true,  forestry=true,  water=true),
 )
 # from = to
 reversed = LandscapeChange.reverse_transitions(transitions) 
@@ -441,8 +441,26 @@ end
 end
 
 
+timeline = NV{k}.([
+    (true, false, false, false, false, false)
+    (true, false, false, true, false, false)
+    (true, true, false, true, false, false)
+    (false, true, true, false, true, false)
+    (true, true, false, false, false, true)
+])
+
+timeline = NV{k}.([
+    (true, false, false, false, false, false)
+    (true, true,  false, false, false, true)
+])
+
+
+
+
 nv_rasts.mus[Y=Contains(-20.202), X=Contains(57.500)] |> parent
 compiled = map(nv_rasts) do nv_rast
     cross_validate_timeline(logic, nv_rast; simplify=true, cull=true)#, force)
 end
 compiled.mus.timeline[Y=Contains(-20.202), X=Contains(57.500)]
+
+include("apply_both_transitions.jl")
