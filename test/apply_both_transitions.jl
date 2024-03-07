@@ -51,9 +51,34 @@ using LandscapeChange: apply_both_transitions!
         (true, false, true, false, true, true)
         (true, true,  false, true, false, true)
     ])
-    @test apply_both_transitions!(copy(timeline), logic) == NV{k}.([
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test result == NV{k}.([
         (true, false, false, false, false, true)
         (true, false, false, false, false, true)
+    ])
+    timeline = NV{k}.([
+        (true, true, true, false, true, true)
+        (true, true, true, false, true, true)
+        (false, true,  true, true, false, true)
+    ])
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test result == NV{k}.([
+        (false, true, true, false, false, true)
+        (false, true, true, false, false, true)
+        (false, true,  true, false, false, true)
+    ])
+    timeline = NV{k}.([
+        (true, true, true, false, true, true)
+        (true, true, true, false, true, true)
+        (false, true,  true, true, false, true)
+        (false, true,  true, true, false, true)
+    ])
+    result = apply_both_transitions!(copy(timeline), logic)
+    @test result == NV{k}.([
+        (false, true, true, false, false, true)
+        (false, true, true, false, false, true)
+        (false, true,  true, false, false, true)
+        (false, true,  true, false, false, true)
     ])
     end
 
