@@ -1,19 +1,3 @@
-"""
-    indirect_transitions(transitions::NamedVector{K})
-
-Calculate all indirect transitions in the graph recursively.
-"""
-function indirect_transitions(transitions::NamedVector{K}) where K
-    states = NamedVector{K}(ntuple(identity, length(K)))
-    return indirect_transitions(states, transitions)
-end
-function indirect_transitions(states, transitions)
-    map(states) do s1
-        map(states) do s2
-            _can_change(states, transitions, s1, s2)
-        end
-    end
-end
 
 function reverse_transitions(transitions::NamedVector{K}) where K
     map(NamedVector{K}(K)) do k
@@ -23,15 +7,53 @@ function reverse_transitions(transitions::NamedVector{K}) where K
     end
 end
 
-function _can_change(states, transitions, to, from, checked=(), path=())
+"""
+    indirect_transitions(transitions::NamedVector{K})
+
+Calculate all indirect transitions in the graph recursively.
+"""
+function indirect_transitions(transitions::NamedVector{K}) where K
+    indices = NamedVector{K}(ntuple(identity, length(K)))
+    return indirect_transitions(indices, transitions)
+end
+function indirect_transitions(indices, transitions)
+    map(indices) do s1
+        map(indices) do s2
+            _can_change(indices, transitions, s1, s2)
+        end
+    end
+end
+
+all_transitions(trans::NamedVector) = (trans, next_transitions(trans)...)
+function next_transitions(transitions::NamedVector{K}) where K
+    indices = NamedVector{K}(ntuple(identity, length(K)))
+    next = map(indices) do s1
+        mapreduce(.|, indices) do s2
+            if transitions[s1][s2]
+                map(indices) do s3
+                    transitions[s2][s3]
+                end
+            else
+                map(_ -> false, indices)
+            end
+        end
+    end
+    if next == transitions
+        ()
+    else
+        (next, next_transitions(next)...)
+    end
+end
+
+function _can_change(indices, transitions, to, from, checked=(), path=())
     if transitions[to][from]
         return true
     else
-        return map(states) do s
+        return map(indices) do s
             if s == to || s in checked
                 false
             elseif transitions[to][s]
-                _can_change(states, transitions, s, from, (checked..., to), (path..., from))
+                _can_change(indices, transitions, s, from, (checked..., to), (path..., from))
             else
                 false
             end
@@ -40,7 +62,7 @@ function _can_change(states, transitions, to, from, checked=(), path=())
 end
 
 """
-    namedvector_raster(x, states)
+    namedvector_raster(x)
 
 Collapse a stack into a raster of `NamedVector`.
 """
@@ -111,25 +133,26 @@ and the error associated with forcing `transitions`.
 cross_validate_timeline(transitions, ser::RasterSeries; kw...) =
     cross_validate_timeline(transitions, Rasters.combine(ser, Ti); kw...)
 function cross_validate_timeline(transitions::NamedVector{K}, source::Raster{T};
-    indirect=indirect_transitions(transitions),
-    reversed=reverse_transitions(transitions),
-    reversed_indirect=reverse_transitions(indirect),
     kw...
 ) where {K,T}
-    states = NamedVector{K}(ntuple(identity, length(K)))
     dest = copy(source)
     N = size(timeline, Ti())
-    logic = (; transitions, indirect, reversed, reversed_indirect)
+    logic = (; 
+        transitions=all_transitions(transitions),
+        reversed=all_transitions(reverse_transitions(transitions)),
+    )
 
     # Function barrier
     return _cross_validate_timeline!(dest, source, logic, Val(N))
 end
-function _cross_validate_timeline_inner!(dest::Raster{T}, source::Raster{T}, logic, ::Val{N}) where {N,K,T}
-    for xy in DimIndices(dims(raster, (X(), Y())))
-        pixel_timeline = ntuple(i -> raster[xy..., Ti(t)], N)
-        filled = apply_both_transitions(pixel_timeline, logic)
-        # Write to dest
-        for (i, x) in enumerate(pixel_timeline)
+function _cross_validate_timeline!(dest::Raster{T}, source::Raster{T}, logic, ::Val{N}) where {N,K,T}
+    for xy in DimIndices(dims(source, (X(), Y())))
+        # Read a single timeline as a Tuple
+        timeline = ntuple(i -> source[xy..., Ti(i)], N)
+        # Update it with transition logic
+        updated = apply_transitions(timeline, logic)
+        # Write it to the dest array
+        for (i, x) in enumerate(updated)
             dest[xy..., Ti(i)] = x
         end
     end
@@ -139,252 +162,232 @@ function _cross_validate_timeline_inner!(dest::Raster{T}, source::Raster{T}, log
     # return rebuild(x; missingval)
 end
 
-function apply_both_transitions(
+function apply_transitions(
     timeline::Tuple,
-    logic::NamedTuple, # = (; transitions, indirect, reversed, reversed_indirect)
-) where K
-    lower = upper = (;
+    logic::NamedTuple, # = (; transitions, reversed, reversed_indirect)
+)
+    up = down = (;
         forced = zero(first(timeline)),
         uncertain = zero(first(timeline)),
     )
-    newtimeline, _, _ = _combine(timeline, logic, lower, upper)
+    newtimeline, _, _ = _combine(timeline, logic, up, down, firstindex(timeline), lastindex(timeline))
     return newtimeline
 end
 
-Base.@assume_effects :foldable _combine(timeline::Tuple{}, logic, lower::L, upper::L) where L = (), upper, lower
-Base.@assume_effects :foldable function _combine(timeline::Tuple{T,Vararg}, logic, lower::L, upper::L) where {T,L}
-    # Get the current timeline values
-    tl = first(timeline)
-    tu = last(timeline)
-    ctl = count(tl)
-    ctu = count(tu)
-    lower_forced = ctl == 1
-    upper_forced = ctu == 1
+struct Forced end
+struct Uncertain end
 
-    # @show lower upper
-    # @show tl tu
-    # @show ctl ctu
-    # Update the forced and uncertain categories based on the current values
-    if lower_forced # We have 1 certain category: update forced and remove uncertain
-        forced, match= merge_forced(tl, lower.forced, logic.transitions, logic.indirect)::Tuple{T,Bool}
-        uncertain = zero(lower.uncertain)::T
-        lower = (; forced, uncertain)::L
-    elseif ctl != 0 # We have multiple uncertain categories: update uncertain
-        # forced, match = merge_forced(tu, lower.forced, logic.transitions, logic.indirect)
-        forced = lower.forced::T
-        uncertain, match = merge_uncertain(tl, lower.uncertain, logic.reversed, logic.reversed_indirect)::Tuple{T,Bool}
-        lower = (; forced, uncertain)::L
+Base.@assume_effects :foldable function _combine(::Tuple{}, logic, upfrom::L, downfrom::L, i, j) where L
+    return (), downfrom, upfrom
+end
+Base.@assume_effects :foldable function _combine(timeline::Tuple{<:Any}, logic, upfrom::L, downfrom::L, i, j) where L
+    t = first(timeline)
+    # println("\n++++++++ Start single center +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+    # @show t downfrom upfrom
+
+    # Combine timeline and carried over
+    _, up = _merge_to(upfrom, t, logic.reversed)
+    _, down = _merge_to(downfrom, t, logic.transitions)
+    final = if any(up.forced)
+        if any(down.forced)
+            map(|, up.forced, down.forced)
+        else
+            combined = map(&, up.forced, down.forced)
+            if any(combined)
+                combined
+            else
+                # TODO this could be reduced further
+                map(|, up.forced, down.forced)
+            end
+        end
+    else
+        if any(down.forced)
+            combined = map(&, up.uncertain, down.forced)
+            if any(combined)
+                combined
+            else
+                map(|, up.uncertain, down.forced)
+            end
+        else
+            combined = map(&, up.uncertain, down.uncertain)
+            if any(combined)
+                combined
+            else
+                map(|, up.uncertain, down.uncertain)
+            end
+        end
     end
-    if upper_forced # We have 1 certain category: update forced and remove uncertain
-        # TODO what if uncertain cant convert to certain
-        forced, match = merge_forced(tu, upper.forced, logic.transitions, logic.indirect)::Tuple{T,Bool}
-        uncertain = zero(upper.uncertain)::T # No uncertainty
-        upper = (; forced, uncertain)::L
-    elseif ctu != 0 # We have multiple uncertain categories: update uncertain
-        # Existing forced states continue
-        # forced, match = merge_forced(tu, lower.forced, logic.transitions, logic.indirect)
-        forced = upper.forced
-        # Merge uncertain states over transitions
-        uncertain, match = merge_uncertain(tu, upper.uncertain, logic.transitions, logic.indirect)::Tuple{T,Bool}
-        upper = (; forced, uncertain)::L
-    end
-    # @show lower upper
+    # @show final
+    # println("++++++++ End single center +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
+    return (final,), down, up
+end
+Base.@assume_effects :foldable function _combine(timeline::Tuple{T,Vararg}, logic, upfrom::L, downfrom::L, i, j) where {T,L}
+    # println("\n=== ", (i, j), " ============================================================================")
+    # Get the current timeline values
+    tup = first(timeline)
+    tdown = last(timeline)
+
+    # Combine timeline and previous states up and down
+    _, merged_up = _merge_to(upfrom, tup, logic.reversed)
+    _, merged_down = _merge_to(downfrom, tdown, logic.transitions)
+
+    # @show upfrom tup merged_up
+    # println("*")
+    # @show downfrom tdown merged_down
+    # println("---- ", (i, j), " ----------------------------------------------------------------------")
 
     # Recursively move inwards in the timeline
-    innertimeline, innerlower, innerupper = _combine(timeline[begin+1:end-1], logic, lower, upper)
+    innertimeline, upto, downto = _combine(timeline[begin+1:end-1], logic, merged_up, merged_down, i+1, j-1)
 
-    # Update the timeline with combined values from forwards/backwards passes
+    # println("X")
+    # println("\n=== ", (i, j), " ============================================================================")
+    # ntup = count(tup)
+    # ntdown = count(tdown)
+    # up_is_forced = ntup == 1
+    # down_is_forced = ntdown == 1
+    # idm = any(downto.forced) ? :forced : :uncertain
+    # dm = down_is_forced ? :forced : :uncertain
+    # ium = any(upto.forced) ? :forced : :uncertain
+    # um = up_is_forced ? :forced : :uncertain
 
+    # # Update the timeline with merged values from forwards/backwards passes
+    # println("Up to:")
+    finalup, next_up_to = _merge_to(upto, merged_up, logic.transitions)
+    # println("Down to:")
+    finaldown, next_down_to = _merge_to(downto, merged_down, logic.reversed)
+    new_timeline = (finalup, innertimeline..., finaldown)
+
+    # @show tup upfrom merged_up upto finalup next_up_to
+    # println("*")
+    # @show tdown downfrom merged_down downto finaldown next_down_to
+    # println("---- ", (i, j), " ----------------------------------------------------------------------")
     # println()
-    # @show any(innerlower.forced) lower_forced
-    if any(innerlower.forced)
-        # @show "innerlower forced"
-        if lower_forced
-            finallower, match = merge_forced(innerlower.forced, tl, logic.transitions, logic.indirect)::Tuple{T,Bool}
-            returnlower = (forced=finallower, uncertain=zero(finallower))::L
-        else
-            finallower, match = merge_forced(innerlower.forced, tl, logic.transitions, logic.indirect)::Tuple{T,Bool}
-            if count(finallower) == 1
-                returnlower = (forced=finallower, uncertain=zero(finallower))::L
-            else
-                returnlower = (forced=innerlower.forced, uncertain=finallower)::L
-            end
-        end
-    else
-        # @show "innerlower uncertain"
-        if lower_forced
-            finallower, match = merge_forced(innerlower.uncertain, tl, logic.transitions, logic.indirect)::Tuple{T,Bool}
-            returnlower = (forced = tl, uncertain=finallower)::L
-        else
-            finallower, match = merge_uncertain(innerlower.uncertain, tl, logic.transitions, logic.indirect)::Tuple{T,Bool}
-            returnlower = (forced = zero(finallower), uncertain=finallower)::L
-        end
-    end
-
-    # println()
-    # @show any(innerupper.forced) upper_forced
-    if any(innerupper.forced)
-        # @show "innerupper forced"
-        if upper_forced
-            finalupper, match = merge_forced(innerupper.forced, tu, logic.reversed, logic.reversed_indirect)::Tuple{T,Bool}
-            # @show innerupper.forced tu finalupper logic.reversed
-            returnupper = (forced=finalupper, uncertain=zero(finalupper))::L
-        else
-            finalupper, match = merge_uncertain(innerupper.forced, tu, logic.reversed, logic.reversed_indirect)::Tuple{T,Bool}
-            if count(finalupper) == 1
-                returnupper = (forced=finalupper, uncertain=zero(finalupper))::L
-            else
-                returnupper = (forced=innerupper.forced, uncertain=finalupper)::L
-            end
-        end
-    else
-        # @show "innerupper uncertain"
-        if upper_forced
-            finalupper, match = merge_uncertain(innerupper.uncertain, tu, logic.reversed, logic.reversed_indirect)::Tuple{T,Bool}
-            returnupper = (forced=tu, uncertain=finalupper)::L
-        else
-            finalupper, match = merge_uncertain(innerupper.uncertain, tu, logic.reversed, logic.reversed_indirect)::Tuple{T,Bool}
-            returnupper = (forced=zero(finalupper), uncertain=finalupper)::L
-        end
-    end
-    # println()
-    # @show finallower finalupper
-    # println()
-
-    # Update timeline to the best combined
-    # values from forward and backawards passes
-    
-    # Check if there is one or two times to write to.
-    # At the mid point we will only have one if we have
-    # an odd number of layers.
-    if length(timeline) == 1
-        # We only have one line, not two. So combine it.
-        
-        # Keep all the forced categories
-        combined = map(|, returnlower.forced, returnupper.forced)
-        # If there are no forced, keep the minimum uncertain categories 
-        if !any(combined)
-            combined = map(&, finallower, finalupper)
-        end
-        # If there are no shared uncertain categories, 
-        # keep all the uncertain categories 
-        if !any(combined)
-            combined = map(|, finallower, finalupper)
-        end
-        return (combined,), returnlower, returnupper
-    else
-        # We have two times, just return finallower and finalupper
-        return (finallower, innertimeline..., finalupper), returnlower, returnupper
-    end
-
-    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values    # Return updated forced and uncertain values
+    return new_timeline, next_up_to, next_down_to
 end
 
-Base.@assume_effects :total function merge_uncertain(
-    source::T, dest::T, transitions::L, indirect_transitions::L,
-)::Tuple{T,Bool} where {T<:NamedVector{K},L<:NamedVector{K}} where K
-    # Handle completely missing values
-    any(source) || return dest, true
-    any(dest) || return source, true
-    # First see if they share values already and assume continuity
-    shared = map(&, source, dest)
-    any(shared) && return shared, true
-    bitmasks = generate_bitmasks(source)
-    # Otherwise find all possible transitions between uncertain states
-    # We need to lock down dest in a let block for type stability
-    let dest=dest
-        @inline function f((acc, match), (s, direct_dest, indirect_dest, bitmask))
-            m = match
-            x = if s
-                direct = map(&, dest, direct_dest)
-                indirect = map(&, dest, indirect_dest)
-                xs = if any(direct)
-                    direct
-                else
-                    if any(indirect)
-                        indirect
-                    else
-                        # @warn "Broken logic in merge_uncertain: keep this category, unmatch"
-                        # @show source dest
-                        # @show bitmask
-                        m = true
-                        bitmask
-                    end
-                end
-                map(|, xs, acc)
-            else
-                acc
-            end
-            return (x, m)
+# Get source and dest modes
+Base.@assume_effects :foldable function _merge_to(source::T, dest::T, transitions) where {T<:NamedTuple}
+    sm, s = any(source.forced) ? (Forced(), source.forced) : (Uncertain(), source.uncertain)
+    dm, d = any(dest.forced) ? (Forced(), dest.forced) : (Uncertain(), dest.uncertain)
+    return _merge_to(sm, dm, s, d, transitions)
+end
+Base.@assume_effects :foldable function _merge_to(source::L, dest::T, transitions) where {L<:NamedTuple,T<:NamedVector}
+    sm, s = any(source.forced) ? (Forced(), source.forced) : (Uncertain(), source.uncertain)
+    dm, d = (count(dest) == 1 ? Forced() : Uncertain()), dest
+    return _merge_to(sm, dm, s, d, transitions)
+end
+# Handle assigning state to forced or uncertain
+Base.@assume_effects :foldable @inline function _merge_to(
+    sourcemode, destmode, source::T, dest::T, transitions
+) where {T<:NamedVector}
+    final = _merge(sourcemode, destmode, source, dest, transitions)
+    next_dest = if sourcemode isa Uncertain
+        # Move single category from uncertain to forced
+        if destmode isa Forced || count(final) == 1
+            (forced=final, uncertain=zero(final))
+        else
+            (forced=zero(final), uncertain=final)
         end
-        foldl(f, zip(source, transitions, indirect_transitions, bitmasks); init=(zero(source), true))
+    else
+        (forced=final, uncertain=zero(final))
     end
+    return final, next_dest
 end
 
-Base.@assume_effects :foldable function merge_forced(
-    source::T, dest::T, transitions::L, indirect_transitions::L,
-)::Tuple{T,Bool} where {T<:NamedVector{K},L<:NamedVector{K}} where K
-    any(source) || return dest, true
-    any(dest) || return source, true
-    bitmasks = generate_bitmasks(source)
-    f = let dest=dest
-        function ((acc, match), (s, direct_dest, indirect_dest, bitmask))
-            x = if s
-                direct = map(&, dest, direct_dest)
-                # @show source dest direct_dest direct
-                xs = if any(direct)
-                    direct
-                else
-                    indirect = map(&, dest, indirect_dest)
-                    if any(indirect)
-                        indirect
-                    else
-                        # @warn "Broken logic in merge_forced: merging"
-                        # Broken logic: keep this category, unmatch
-                        match = false
-                        map(|, bitmask, dest)
-                    end
-                end
-                map(|, xs, acc)
-            else
-                acc
-            end
-            return x, match
-        end
-    end
-    return foldl(f, zip(source, transitions, indirect_transitions, bitmasks); init=(zero(source), true))
-end
-
-const LOG = []
-
-Base.@assume_effects :foldable function merge_all(
-    source::NamedVector{K}, dest::NamedVector{K},
-    transitions::NamedVector{K}, indirect::NamedVector{K},
-) where K
+Base.@assume_effects :foldable function _merge(
+    sourcemode, destmode, source::T, dest::T, transitions::Tuple
+)::T where {T<:NamedVector{K}} where K
+    # println("********************** $sourcemode $destmode **************************")
+    # Just return identical source and dest
+    source == dest && return dest
+    # Handle completely missing source or dest
     any(source) || return dest
+    # We minimise forced values in the source throught its possible 
+    # transitions, they may resolve to one or two distinct timelines. 
+    any(dest) || return _minimise_states(sourcemode, source, transitions...)
+
+    # Otherwise find transitions between uncertain states.
+    # This loop handles merging previous and current state.
+    # If a previous state can move to a current state directly or indirectly
+    # it is replaced with the dest state, otherwise kept.
+    # Where no source can transition to them, dest states are dropped.
+    # For Forced mode, all dest state is added aftwerwards.
     bitmasks = generate_bitmasks(source)
-    reduce(zip(source, transitions, indirect, bitmasks); init=(zero(source), true)) do (acc, match), (s, direct_dest, indirect_dest, bitmask)
-        x = if s
-            direct = map(&, dest, direct_dest)
-            xs = if any(direct)
-                direct
-            else
-                indirect = map(&, dest, indirect_dest)
-                if any(indirect)
-                    indirect
-                else
-                    # Broken logic: keep this category, unmatch
-                    match = false
-                    bitmask
+    merged = zero(source)
+    for i in eachindex(source)
+        if source[i]
+            # Loop over all transition distances until one/multiple possible transitions are found
+            transitioned = zero(source)
+            for t in transitions
+                attempt = map(&, dest, t[i])
+                if any(attempt)
+                    transitioned = attempt
+                    break
                 end
             end
-            map(|, xs, acc)
-        else
-            acc
+            new_states = if any(transitioned)
+                transitioned
+            else
+                # Nothing matching was found
+                if sourcemode == Forced()
+                    # If source is forced return it 
+                    bitmasks[i]
+                else
+                    # Otherwise remove this state
+                    zero(source)
+                end
+            end
+            merged = map(|, merged, new_states)
         end
-        return x, match
+    end
+    # This only acts on Forced, which will add dest state back afterwards
+    minimum = _minimise_states(destmode, merged, transitions...)
+    # Finish the merge for specific sourcemode and destmode combinations
+    return _merge1(sourcemode, destmode, minimum, source, dest)
+end
+
+@inline function _merge1(::Forced, ::Forced, out, source, dest)
+    # dest is forced so keep it all
+    return map(|, out, dest)
+end
+@inline function _merge1(::Uncertain, ::Forced, out, source, dest)
+    # Don't add extra uncertain states
+    if map(&, source, dest) == dest
+        return dest
+    else
+        # Dest is forced so keep it all
+        return map(|, out, dest)
     end
 end
+@inline function _merge1(::Forced, ::Uncertain, out, source, dest)
+    # Don't add extra uncertain states
+    map(&, source, out) == source ? source : out
+end
+@inline function _merge1(::Uncertain, ::Uncertain, out, source, dest)
+    # See if source and dest share values without needing transitions
+    shared = map(&, source, dest)
+    any(shared) ? shared : out
+end
+
+function _minimise_states(::Forced, source::NamedVector{K}, transitions...) where K
+    bitmasks = generate_bitmasks(source)
+    indices = NamedVector{K}(ntuple(identity, length(K)))
+    mapreduce(.|, source, indices, bitmasks) do s1, i1, bm
+        if s1
+            possible_transitions = map(indices, source) do i2, s2
+                s2 && transitions[end][i1][i2]
+            end
+            if count(possible_transitions) > 1
+                zero(source)
+            else
+                bm
+            end
+        else
+            zero(source)
+        end
+    end
+end
+_minimise_states(::Uncertain, source::NamedVector, transitions...) = source
 
 @generated function generate_bitmasks(::NamedVector{K}) where K
     nvs = ntuple(length(K)) do i
@@ -395,3 +398,4 @@ end
     expr = Expr(:tuple, nvs...)
     return :(NamedVector{K}($expr))
 end
+
