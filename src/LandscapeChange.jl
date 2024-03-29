@@ -25,7 +25,7 @@ export PreallocatedUnorderedList, NamedVector
 
 export sim, fuzzy_scores, cover_change, cover_persistence, cover_fraction
 
-export stripe_raster, namedvector_raster, compile_timeline, cross_validate_timeline
+export stripe_raster, color_raster, namedvector_raster, compile_timeline, cross_validate_timeline
 
 import DynamicGrids.Stencils: neighbors, unsafe_neighbors, stencil, unsafe_stencil,
     kernel, kernelproduct, offsets, positions, radius, distances, distance_zones,

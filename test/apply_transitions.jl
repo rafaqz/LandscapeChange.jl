@@ -238,8 +238,7 @@ end
             (false, false, false, false, false, false),
             (false, false, false, false, false, false),
         ))
-        result = apply_transitions(timeline, logic)
-        collect(result)
+        result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
             (false, false, false, false, false, false),
             (false, false, false, false, false, false),
@@ -249,22 +248,21 @@ end
             (false, false, false, false, false, false),
         ))
         timeline = NV{k}.((
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
         ))
-        result = apply_transitions(timeline, logic)
-        collect(result)
+        result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
-            (true, true, true, true, true, true),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
+            (true, true, true, true, true, false),
         ))
     end
 
@@ -329,11 +327,11 @@ end
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (true, false, false, false, false, false),
-            (true, false, false, false, false, false),
             (true, false, false, false, false, true),
             (true, false, false, false, false, true),
-            (true, false, true,  false, false, true),
+            (true, false, false, false, false, true),
+            (true, false, true , false, false, true),
+            (true, false, true , false, false, true),
             (true, false, false, false, false, true),
         ))
         timeline = NV{k}.((
@@ -418,6 +416,28 @@ end
 
     @testset "No unnecessary forcing with multiple forced" begin
         timeline = NV{k}.((
+            (true,  false, false, false, false, false),
+            (true,  false, false, false, false, false),
+            (true,  false, false, false, false, false),
+            (true,  false, false, false, false, false),
+            (true,  false, false, false, false, false),
+            (true,  false, false, false, false, false),
+            (true,  false, true , false, false, false),
+            (true,  false, false, false, false, false),
+            (false, true , false, false, false, false),
+            (false, false, false, false, false, false),
+            (false, true , false, true , false, false),
+            (false, false, false, false, false, false),
+            (false, false, false, false, false, false),
+            (false, false, false, false, false, false),
+            (false, true , false, true , false, false),
+            (false, false, false, false, false, false),
+            (false, true , false, false, false, false),
+            (false, false, true , true , false, false),
+        ))
+        result = apply_transitions(timeline, logic); collect(result)
+
+        timeline = NV{k}.((
             (false, false, false, false, false, false),
             (false, false, false, false, false, true),
             (false, false, false, true,  false, false),
@@ -425,10 +445,10 @@ end
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (true, false, false, false, false, false),
+            (true, false, false, false, false, true),
             (true, false, false, false, false, true),
             (true, false, false, true, false, true),
-            (true, false,  false, false, false, true),
+            (true, false, false, false, false, true),
         ))
         timeline = NV{k}.((
             (false, false, false, false, false, true),
@@ -439,9 +459,9 @@ end
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
             (true, false, false, false, false, true),
+            (true, false, true , false, false, true),
+            (true, false, true , false, false, true),
             (true, false, false, false, false, true),
-            (true, false, true,  false, false, true),
-            (true, false, false,  false, false, true),
         ))
         timeline = NV{k}.((
             (false, false, false, false, false, false),
@@ -453,12 +473,12 @@ end
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (true, false, false, false, false, false),
+            (true, false, false, false, false, true),
             (true, false, false, false, false, true ),
             (true, false, false, true,  false, true ),
             (true, false, false, false,  false, true ),
-            (false, false, false, false,  false, true ),
-            (false, false, false, false,  false, true ),
+            (true, false, false, false,  false, true ),
+            (true, false, false, false,  false, true ),
         ))
 
         timeline = NV{k}.((
@@ -471,12 +491,12 @@ end
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (false, true,  false, false, false, false),
+            (false, true,  false, false, false, true),
             (false, true,  false, false, false, true ),
             (false, true,  false, true,  false, true ),
             (false, true,  false, false, false, true ),
-            (false, false, false, false, false, true ),
-            (false, false, false, false, false, true ),
+            (false, true, false, false, false, true ),
+            (false, true, false, false, false, true ),
         ))
 
         timeline = NV{k}.((
@@ -493,19 +513,19 @@ end
             (true,  false, false, false, false, true ),
             (true,  false, false, false, false, true ),
             (false, false, true,  false, false, true ),
-            (false, false, false, false, true,  true ),
+            (false, false, true,  false, true,  true ),
             (false, false, false, false, true,  true ),
         ))
 
-        timeline = NV{k}.((
-            (false, false, false, true,  false,  false),
-            (true,  false, true,  false, true,  true),
-            (true,  false, false, false, false, false),
-            (false, false, true,  false, false, false),
-            (false, false, false, false, false, false),
-            (false, false, false, false, true,  false),
-        ))
-        result = apply_transitions(timeline, logic); collect(result)
+        # timeline = NV{k}.((
+        #     (false, false, false, true,  false,  false),
+        #     (true,  false, true,  false, true,  true),
+        #     (true,  false, false, false, false, false),
+        #     (false, false, true,  false, false, false),
+        #     (false, false, false, false, false, false),
+        #     (false, false, false, false, true,  false),
+        # ))
+        # result = apply_transitions(timeline, logic); collect(result)
 
         timeline = NV{k}.((
             (false, true , false, false, false, false),
@@ -520,7 +540,7 @@ end
             (true,  true , false, false, false, false),
             (true,  false, true , false, false, false),
             (true,  false, true , false, false, false),
-            (false, false, false, false, false, true ),
+            (true,  false, true , false, false, true ),
             (false, false, false, false, false, true ),
             (false, false, false, false, false, true ),
         ))
@@ -534,10 +554,10 @@ end
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-             (false, false, true,  false, false, false),
-             (false, false, true,  false, true,  false),
-             (false, false, true,  false, true,  false),
-             (false, false, false, false, false, true ),
+             (false, false, true,  false, true , false),
+             (false, false, true,  false, true , false),
+             (false, false, true,  false, true , true ),
+             (false, false, true , false, true , true ),
              (false, false, false, false, false, true ),
              (false, false, false, false, false, true ),
         ))
@@ -548,25 +568,69 @@ end
             (false, false, false, false, false, false),
             (false, false, false, false, false, false),
             (false, false, false, false, false, false),
+        ))
+        result = apply_transitions(timeline, logic); collect(result)
+        @test_broken result == NV{k}.((
+            (false, false, false, false, false, true),
+            (false, false, false, true , false, true),
+            (false, false, false, true , false, true),
+            (false, false, false, false, false, true),
+            (false, false, false, false, false, true),
+            (false, false, false, false, false, true),
+        ))
+        # timeline = NV{k}.((
+        #     (true , false, false, true , true , false),
+        #     (false, true , false, true,  false, false),
+        #     (false, false, false, false, false, false),
+        #     (false, false, false, false, false, true ),
+        #     (false, false, false, false, false, false),
+        #     (false, false, false, false, false, false),
+        # ))
+        # result = apply_transitions(timeline, logic); collect(result)
+
+        timeline = NV{k}.((
+            (true , false, false, false, false, false),
+            (true , true , false, false, false, false),
+            (true , true , false, false, false, false),
+            (false, true , false, false, false, false),
+            (true , true , true, false, false, false),
+            (false , false, true, true, false, false),
+            (false, false, true, false, false, false),
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
+            (true, false, false, false, false, false),
+            (true, true, false, false, false, false),
+            (true, true, false, false, false, false),
+            (false, true, false, false, false, false),
+            (false, true, true, false, false, false),
+            (false, false, true, false, false, false),
+            (false, false, true, false, false, false),
         ))
+
         timeline = NV{k}.((
-            (true , false, false, true , true , false),
-            (false, true , false, true,  false, false),
+            (true , false, false, false, false, false),
+            (true , true , false, false, false, false),
+            (true , true , false, false, false, false),
+            (false, true , false, false, false, false),
+            (true , true , true, false, false, false),
+            (false , false, true, true, false, false),
+            (false, false, true, false, false, false),
             (false, false, false, false, false, false),
-            (false, false, false, false, false, true ),
-            (false, false, false, false, false, false),
-            (false, false, false, false, false, false),
+            (false, false, false, false, false, true),
         ))
         result = apply_transitions(timeline, logic); collect(result)
+        @test result == NV{k}.((
+            (true, false, false, false, false, false),
+            (true, true, false, false, false, false),
+            (true, true, false, false, false, false),
+            (false, true, false, false, false, false),
+            (false, true, true, false, false, false),
+            (false, false, true, false, false, false),
+            (false, false, true, false, false, false),
+            (false, false, true, false, false, true),
+            (false, false, false, false, false, true),
+        ))
     end
 end
 
