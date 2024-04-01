@@ -175,90 +175,50 @@ function _cross_validate_timeline!(dest::Raster{T}, source::Raster{T}, logic, ::
         end
     end
     return dest
-    # missingval = (timeline=zero(eltype(timeline)), error=zero(eltype(error)))
-    # x = RasterStack((; timeline, error); missingval)
-    # return rebuild(x; missingval)
 end
 
-function apply_transitions(
-    timeline::Tuple,
-    logic::NamedTuple, # = (; transitions, reversed, reversed_indirect)
-)
-    up = down = (;
-        forced = zero(first(timeline)),
-        uncertain = one(first(timeline)),
-    )
-    newtimeline, _, _ = _combine(timeline, logic, up, down, firstindex(timeline), lastindex(timeline))
+function apply_transitions(timeline::Tuple, logic::NamedTuple) # (; transitions, reversed, reversed_indirect)
+    state = _init_state(first(timeline))
+    newtimeline, _ = _combine(timeline, logic, state, firstindex(timeline))
     return newtimeline
 end
+
+_init_state(x) = (; forced=zero(x), latent_forced=zero(x), uncertain=one(x), latent_uncertain=zero(x))
+_maybefillmissing(t) = any(t) ? t : map(x -> true, t)
 
 struct Forced end
 struct Uncertain end
 
-Base.@assume_effects :foldable function _combine(::Tuple{}, logic, upfrom::L, downfrom::L, i, j) where L
-    return (), downfrom, upfrom
+Base.@assume_effects :foldable function _combine(::Tuple{}, logic, from::L, i) where L
+    return (), _init_state(first(from))
 end
-Base.@assume_effects :foldable function _combine(timeline::Tuple{<:Any}, logic, upfrom::L, downfrom::L, i, j) where L
-    t = _maybefillmissing(first(timeline))
-    # println("\n++++++++ Start single center +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
-    # @show t downfrom upfrom
-
-    # Combine timeline and carried over
-    _, up = _merge_to(upfrom, t, logic.reversed)
-    _, down = _merge_to(downfrom, t, logic.transitions)
-    final = _finalise(up, down)
-    # println("++++++++ End single center +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n")
-    down = (; forced=down.forced, uncertain=final)
-    up = (; forced=up.forced, uncertain=final)
-    return (final,), down, up
-end
-Base.@assume_effects :foldable function _combine(timeline::Tuple{T,Vararg}, logic, upfrom::L, downfrom::L, i, j) where {T,L}
-    # println("\n=== ", (i, j), " ============================================================================")
+Base.@assume_effects :foldable function _combine(timeline::Tuple{T,Vararg}, logic, up::L, i) where {T,L}
+    println("\n=== ", i, " ============================================================================")
     # Get the current timeline values
-    tup = _maybefillmissing(first(timeline))
-    tdown = _maybefillmissing(last(timeline))
+    t = _maybefillmissing(first(timeline))
 
     # Combine timeline and previous states up and down
-    _, outer_merged_up = _merge_to(upfrom, tup, logic.reversed)
-    _, outer_merged_down = _merge_to(downfrom, tdown, logic.transitions)
-    # @show tdown downfrom outer_merged_down
-    # @show tup upfrom outer_merged_up
-    # println("=== ", (i, j), " ============================================================================\n")
+    _, merged_up = _merge_to(up, t, logic.reversed)
+    @show t up merged_up
+    println("=== ", i, " ============================================================================\n")
 
     # Recursively move inwards in the timeline
-    inner_timeline, upto, downto = _combine(timeline[begin+1:end-1], logic, outer_merged_up, outer_merged_down, i+1, j-1)
-    # ntup = count(tup)
-    # ntdown = count(tdown)
-    # up_is_forced = ntup == 1
-    # down_is_forced = ntdown == 1
-    # idm = any(downto.forced) ? :forced : :uncertain
-    # dm = down_is_forced ? :forced : :uncertain
-    # ium = any(upto.forced) ? :forced : :uncertain
-    # um = up_is_forced ? :forced : :uncertain
+    completed_timeline, down = _combine(Base.tail(timeline), logic, merged_up, i+1)
 
-    # # Update the timeline with merged values from forwards/backwards passes
+    println("\n---- ", i, " ----------------------------------------------------------------------")
+    # Update the timeline with merged values from forwards/backwards passes
+    _, merged_down = _merge_to(down, t, logic.transitions)
+
+    final = _finalise(merged_down, merged_up)#, down, up)
+
+    @show t up down merged_up merged_down final
+    println("---- ", i, " ----------------------------------------------------------------------\n")
+
+    new_timeline = (final, completed_timeline...)
+    merged = (; merged_down[(:forced, :latent_forced)]..., uncertain=final, latent_uncertain=t)
     
-    # println("Up to:")
-    _, inner_merged_up = _merge_to(upto, tup, logic.transitions)
-    # println("Down to:")
-    _, inner_merged_down = _merge_to(downto, tdown, logic.reversed)
-
-    final_up = _finalise(inner_merged_up, outer_merged_up)
-    final_down = _finalise(inner_merged_down, outer_merged_down)
-
-    # println("\n---- ", (i, j), " ----------------------------------------------------------------------")
-    # @show tdown downfrom downto inner_merged_down outer_merged_down final_down
-    # @show tup upfrom upto inner_merged_up outer_merged_up final_up
-    # println("---- ", (i, j), " ----------------------------------------------------------------------\n")
-
-    new_timeline = (final_up, inner_timeline..., final_down)
-    merged_up = (; forced=inner_merged_up.forced, uncertain=final_up)
-    merged_down = (; forced=inner_merged_down.forced, uncertain=final_down)
-    
-    return new_timeline, merged_up, merged_down
+    return new_timeline, merged
 end
-
-_maybefillmissing(t) = any(t) ? t : map(x -> true, t)
 
 function _finalise(up, down)
     if any(up.forced)
@@ -292,47 +252,46 @@ function _finalise(up, down)
 end
 
 # Get source and dest modes
-Base.@assume_effects :foldable function _merge_to(source::T, dest::T, transitions) where {T<:NamedTuple}
-    sm, s = any(source.forced) ? (Forced(), source.forced) : (Uncertain(), source.uncertain)
-    dm, d = any(dest.forced) ? (Forced(), dest.forced) : (Uncertain(), dest.uncertain)
-    return _merge_to(sm, dm, s, d, transitions)
-end
 Base.@assume_effects :foldable function _merge_to(source::L, dest::T, transitions) where {L<:NamedTuple,T<:NamedVector}
     sourcemode, s = any(source.forced) ? (Forced(), source.forced) : (Uncertain(), source.uncertain)
-    destmode, d = (count(dest) == 1 ? Forced() : Uncertain()), dest
-    final, next_dest = _merge_to(sourcemode, destmode, s, d, transitions)
-    # Here we remove unnessesary forcing of uncertain parameters of the 
-    # same graph distance, by filtering them by which is also in the
-    # passed in uncertain categories.
-    next_dest = if sourcemode isa Forced && destmode isa Uncertain
-        shared_forced = map(&, final, source.forced)
-        shared_uncertain = map(&, d, source.uncertain)
-        # If the forced state has changed
-        if !any(shared_forced) && any(shared_uncertain)
-            (forced=shared_uncertain, uncertain=d)
+    destmode = (count(dest) == 1 ? Forced() : Uncertain())
+    final = _merge(sourcemode, destmode, s, dest, transitions)
+    next_dest = if sourcemode isa Forced
+        if destmode isa Forced
+            (; forced=final, latent_forced=zero(final), uncertain=dest, latent_uncertain=source.uncertain)
         else
+            # Here we remove unnessesary forcing of uncertain parameters of the 
+            # same graph distance, by filtering them by which is also in the
+            # passed in uncertain categories.
+            shared_forced = map(&, final, source.forced)
+            # If the forced state has changed
+            next_dest = if !any(shared_forced) 
+                shared_source_uncertain = map(&, final, source.uncertain)
+                shared_dest_uncertain = map(&, dest, final)
+                next_dest = if any(shared_source_uncertain)
+                    final = uncertain = shared_source_uncertain
+                    (; forced=zero(dest), latent_forced=source.forced, uncertain, latent_uncertain=source.uncertain)
+                elseif any(shared_dest_uncertain)
+                    final = uncertain = shared_dest_uncertain
+                    (; forced=zero(final), latent_forced=source.forced, uncertain, latent_uncertain=source.uncertain)
+                else
+                    (; forced=zero(final), latent_forced=source.forced, uncertain=dest, latent_uncertain=source.uncertain)
+                end
+            else
+                (; forced=final, latent_forced=zero(final), uncertain=dest, latent_uncertain=source.uncertain)
+            end
             next_dest
         end
     else
-        next_dest
-    end
-    return final, next_dest
-end
-# Handle assigning state to forced or uncertain
-Base.@assume_effects :foldable @inline function _merge_to(
-    sourcemode, destmode, source::T, dest::T, transitions
-) where {T<:NamedVector}
-    final = _merge(sourcemode, destmode, source, dest, transitions)
-    next_dest = if sourcemode isa Uncertain
-        # Move single category from uncertain to forced
         if destmode isa Forced
-            (forced=final, uncertain=dest)
+            (forced=final, latent_forced=zero(final), uncertain=dest, latent_uncertain=source.uncertain)
         else
-            (forced=zero(final), uncertain=final)
+            (forced=zero(final), latent_forced=zero(final), uncertain=final, latent_uncertain=source.uncertain)
         end
-    else
-        (forced=final, uncertain=dest)
     end
+
+    @show source dest final next_dest
+    println()
     return final, next_dest
 end
 
@@ -342,17 +301,6 @@ Base.@assume_effects :foldable function _merge(
     # println("********************** $sourcemode $destmode **************************")
     # Just return identical source and dest
     source == dest && return dest
-    # Handle completely missing source or dest
-    any(source) || return dest
-    # We minimise forced values in the source throught its possible 
-    # transitions, they may resolve to one or two distinct timelines. 
-    if !any(dest) 
-        if sourcemode isa Forced 
-            return _minimise_states(sourcemode, source, transitions...)
-        else
-            return source
-        end
-    end
 
     # Otherwise find transitions between uncertain states.
     # This loop handles merging previous and current state.
@@ -387,6 +335,7 @@ Base.@assume_effects :foldable function _merge(
             end
             merged = map(|, merged, new_states)
         end
+        # @show merged
     end
     # This only acts on Forced, which will add dest state back afterwards
     minimum = _minimise_states(destmode, merged, transitions...)
