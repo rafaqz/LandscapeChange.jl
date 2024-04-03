@@ -183,7 +183,7 @@ function apply_transitions(timeline::Tuple, logic::NamedTuple) # (; transitions,
     return newtimeline
 end
 
-_init_state(x) = (; forced=zero(x), latent_forced=zero(x), uncertain=one(x), latent_uncertain=zero(x))
+_init_state(x) = (; forced=zero(x), uncertain=one(x))
 _maybefillmissing(t) = any(t) ? t : map(x -> true, t)
 
 struct Forced end
@@ -193,34 +193,33 @@ Base.@assume_effects :foldable function _combine(::Tuple{}, logic, from::L, i) w
     return (), _init_state(first(from))
 end
 Base.@assume_effects :foldable function _combine(timeline::Tuple{T,Vararg}, logic, up::L, i) where {T,L}
-    println("\n=== ", i, " ============================================================================")
+    # println("\n=== ", i, " ============================================================================")
     # Get the current timeline values
     t = _maybefillmissing(first(timeline))
 
     # Combine timeline and previous states up and down
     _, merged_up = _merge_to(up, t, logic.reversed)
-    @show t up merged_up
-    println("=== ", i, " ============================================================================\n")
+    # println("=== /", i, " ============================================================================")
 
     # Recursively move inwards in the timeline
     completed_timeline, down = _combine(Base.tail(timeline), logic, merged_up, i+1)
 
-    println("\n---- ", i, " ----------------------------------------------------------------------")
+    # println("\n---- ", i, " ----------------------------------------------------------------------")
     # Update the timeline with merged values from forwards/backwards passes
     _, merged_down = _merge_to(down, t, logic.transitions)
 
-    final = _finalise(merged_down, merged_up)#, down, up)
+    final = _finalise(merged_up, merged_down, up, down)
 
-    @show t up down merged_up merged_down final
-    println("---- ", i, " ----------------------------------------------------------------------\n")
 
     new_timeline = (final, completed_timeline...)
-    merged = (; merged_down[(:forced, :latent_forced)]..., uncertain=final, latent_uncertain=t)
+    merged = (; forced=merged_down.forced, uncertain=final)
+    # @show t up down merged_up merged_down merged final
+    # println("---- /", i, " ----------------------------------------------------------------------")
     
     return new_timeline, merged
 end
 
-function _finalise(up, down)
+function _finalise(up, down, prev_up, prev_down)
     if any(up.forced)
         if any(down.forced)
             final = map(|, up.forced, down.forced)
@@ -228,7 +227,12 @@ function _finalise(up, down)
             final = if any(map(&, up.forced, down.uncertain))
                 up.forced
             else
-                map(|, up.forced, down.uncertain)
+                combined_uncertain = map(&, down.uncertain, prev_up.uncertain)
+                if any(combined_uncertain)
+                    map(|, up.forced, combined_uncertain)
+                else
+                    map(|, up.forced, down.uncertain)
+                end
             end
         end
     else
@@ -236,14 +240,34 @@ function _finalise(up, down)
             final = if any(map(&, up.uncertain, down.forced))
                 down.forced
             else
-                map(|, up.uncertain, down.forced)
+                combined_uncertain = map(&, up.uncertain, prev_down.uncertain)
+                if any(combined_uncertain)
+                    map(|, combined_uncertain, down.forced)
+                else
+                    map(|, up.uncertain, down.forced)
+                end
             end
         else
             combined = map(&, up.uncertain, down.uncertain)
             final = if any(combined)
                 combined
             else
-                map(|, up.uncertain, down.uncertain)
+                combined_up = map(&, up.uncertain, prev_up.uncertain)
+                combined_down = map(&, down.uncertain, prev_down.uncertain)
+                if any(combined_down)
+                    # @show "here" combined_down
+                    if any(combined_up)
+                        map(|, combined_up, combined_down)
+                    else
+                        combined_down
+                    end
+                else
+                    if any(combined_up)
+                        combined_up
+                    else
+                        map(|, up.uncertain, down.uncertain)
+                    end
+                end
             end
         end
     end
@@ -255,11 +279,12 @@ end
 Base.@assume_effects :foldable function _merge_to(source::L, dest::T, transitions) where {L<:NamedTuple,T<:NamedVector}
     sourcemode, s = any(source.forced) ? (Forced(), source.forced) : (Uncertain(), source.uncertain)
     destmode = (count(dest) == 1 ? Forced() : Uncertain())
+    # println("********************** $sourcemode $destmode **************************")
     final = _merge(sourcemode, destmode, s, dest, transitions)
     next_dest = if sourcemode isa Forced
         if destmode isa Forced
-            (; forced=final, latent_forced=zero(final), uncertain=dest, latent_uncertain=source.uncertain)
-        else
+            (; forced=final, uncertain=dest)
+        else # destmode Uncertain
             # Here we remove unnessesary forcing of uncertain parameters of the 
             # same graph distance, by filtering them by which is also in the
             # passed in uncertain categories.
@@ -270,35 +295,34 @@ Base.@assume_effects :foldable function _merge_to(source::L, dest::T, transition
                 shared_dest_uncertain = map(&, dest, final)
                 next_dest = if any(shared_source_uncertain)
                     final = uncertain = shared_source_uncertain
-                    (; forced=zero(dest), latent_forced=source.forced, uncertain, latent_uncertain=source.uncertain)
+                    (; forced=zero(dest), uncertain)
                 elseif any(shared_dest_uncertain)
                     final = uncertain = shared_dest_uncertain
-                    (; forced=zero(final), latent_forced=source.forced, uncertain, latent_uncertain=source.uncertain)
+                    (; forced=zero(final), uncertain)
                 else
-                    (; forced=zero(final), latent_forced=source.forced, uncertain=dest, latent_uncertain=source.uncertain)
+                    (; forced=zero(final), uncertain=dest)
                 end
             else
-                (; forced=final, latent_forced=zero(final), uncertain=dest, latent_uncertain=source.uncertain)
+                (; forced=final, uncertain=dest)
             end
             next_dest
         end
-    else
+    else # sourcemode Uncertain
         if destmode isa Forced
-            (forced=final, latent_forced=zero(final), uncertain=dest, latent_uncertain=source.uncertain)
-        else
-            (forced=zero(final), latent_forced=zero(final), uncertain=final, latent_uncertain=source.uncertain)
+            (forced=final, uncertain=dest)
+        else # destmode Uncertain
+            (forced=zero(final), uncertain=final)
         end
     end
 
-    @show source dest final next_dest
-    println()
+    # @show source dest final next_dest
+    # println()
     return final, next_dest
 end
 
 Base.@assume_effects :foldable function _merge(
     sourcemode, destmode, source::T, dest::T, transitions::Tuple
 )::T where {T<:NamedVector{K}} where K
-    # println("********************** $sourcemode $destmode **************************")
     # Just return identical source and dest
     source == dest && return dest
 
@@ -335,7 +359,6 @@ Base.@assume_effects :foldable function _merge(
             end
             merged = map(|, merged, new_states)
         end
-        # @show merged
     end
     # This only acts on Forced, which will add dest state back afterwards
     minimum = _minimise_states(destmode, merged, transitions...)
@@ -349,11 +372,13 @@ end
 end
 @inline function _merge1(::Uncertain, ::Forced, out, source, dest)
     # Don't add extra uncertain states
-    if map(&, source, dest) == dest
-        return dest
+    if !any(out)
+        map(|, source, dest)
+    elseif map(&, source, dest) == dest
+        dest
     else
         # Dest is forced so keep it all
-        return map(|, out, dest)
+        map(|, out, dest)
     end
 end
 @inline function _merge1(::Forced, ::Uncertain, out, source, dest)

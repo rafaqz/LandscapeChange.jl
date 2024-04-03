@@ -7,9 +7,9 @@ direct_transitions = NV(
     native    = NV(native=true,  cleared=false, abandoned=false, urban=false, forestry=false,  water=false),
     cleared   = NV(native=true,  cleared=true,  abandoned=true,  urban=false, forestry=false,  water=false),
     abandoned = NV(native=false, cleared=true,  abandoned=true,  urban=false,  forestry=false,  water=false),
-    urban     = NV(native=true,  cleared=true,  abandoned=true,  urban=true,  forestry=false,  water=false),
-    forestry  = NV(native=true,  cleared=true,  abandoned=true,  urban=false, forestry=true,   water=false),
-    water     = NV(native=true,  cleared=true,  abandoned=true,  urban=true,  forestry=true,  water=true),
+    urban     = NV(native=false,  cleared=true,  abandoned=true,  urban=true,  forestry=false,  water=false),
+    forestry  = NV(native=false,  cleared=true,  abandoned=true,  urban=false, forestry=true,   water=false),
+    water     = NV(native=false,  cleared=true,  abandoned=true,  urban=true,  forestry=true,  water=true),
 )
 transitions = all_transitions(direct_transitions)
 reversed = all_transitions(LandscapeChange.reverse_transitions(direct_transitions))
@@ -491,10 +491,10 @@ end
         ))
         result = apply_transitions(timeline, logic); collect(result)
         @test result == NV{k}.((
-            (false, true,  false, false, false, true),
-            (false, true,  false, false, false, true ),
-            (false, true,  false, true,  false, true ),
-            (false, true,  false, false, false, true ),
+            (false, true, false, false, false, true ),
+            (false, true, false, false, false, true ),
+            (false, true, false, true,  false, true ),
+            (false, true, false, false, false, true ),
             (false, true, false, false, false, true ),
             (false, true, false, false, false, true ),
         ))
@@ -516,6 +516,9 @@ end
             (false, false, true,  false, true,  true ),
             (false, false, false, false, true,  true ),
         ))
+    end
+
+    @testset "Not too much removed or too little" begin
 
         # timeline = NV{k}.((
         #     (false, false, false, true,  false,  false),
@@ -565,18 +568,12 @@ end
             (false, false, false, false, false, true ),
             (true , false, false, true , true , false),
             (false, true , false, true,  false, false),
-            (false, false, false, false, false, false),
-            (false, false, false, false, false, false),
-            (false, false, false, false, false, false),
         ))
         result = apply_transitions(timeline, logic); collect(result)
-        @test_broken result == NV{k}.((
+        @test result == NV{k}.((
             (false, false, false, false, false, true),
             (false, false, false, true , false, true),
             (false, false, false, true , false, true),
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
-            (false, false, false, false, false, true),
         ))
         # timeline = NV{k}.((
         #     (true , false, false, true , true , false),
@@ -630,6 +627,47 @@ end
             (false, false, true, false, false, false),
             (false, false, true, false, false, true),
             (false, false, false, false, false, true),
+        ))
+        timeline = NV{k}.((
+            (true, false, false, false, false, false),
+            (false, true, true, true, false, false),
+            (false, true, false, false, false, false),
+        ))
+        result = apply_transitions(timeline, logic); collect(result)
+        @test result == NV{k}.((
+            (true, false, false, false, false, false),
+            (false, true, false, false, false, false),
+            (false, true, false, false, false, false),
+        ))
+        timeline = NV{k}.((
+            (true, false, false, false, false, false),
+            (false, true, true, true, false, false),
+            (true, false, true, false, false, false),
+        ))
+        result = apply_transitions(timeline, logic); collect(result)
+        # TODO should this keep uncertainty with cleared/abandoned??
+        @test result == NV{k}.((
+            (true, false, false, false, false, false),
+            (false, false, true, false, false, false),
+            (false, false, true, false, false, false),
+        ))
+        timeline = NV{k}.((
+            (true, false, false, false, false, false),
+            (true, false, true, false, false, false),
+            (true, false, true, false, true, false),
+            (true, true, true, false, true, false),
+            (false, false, false, false, false, false),
+            (false, false, true, false, true, false),
+        ))
+        result = apply_transitions(timeline, logic); collect(result)
+        # TODO should this keep uncertainty with cleared/abandoned??
+        @test result == NV{k}.((
+            (true, false, false, false, false, false),
+            (true, false, false, false, false, false),
+            (true, false, false, false, false, false),
+            (true, false, false, false, false, false),
+            (true, false, true, false, true, false),
+            (false, false, true, false, true, false),
         ))
     end
 end
