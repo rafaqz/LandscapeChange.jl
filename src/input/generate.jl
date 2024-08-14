@@ -8,7 +8,7 @@ function compile_timeline(file_lists, masks, names::Tuple)
     compile_timeline(file_lists, masks, NamedTuple{names}(names))
 end
 function compile_timeline(file_lists::NamedTuple, masks::NamedTuple, names::NamedTuple)
-    map(masks, file_lists) do m, f
+    map(file_lists, masks) do f, m
         compile_timeline(f, m, names)
     end
 end

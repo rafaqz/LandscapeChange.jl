@@ -53,15 +53,15 @@ function BottomUp{R,W}(;
     suitability,
     history,
     inertia=0.0,
-    pressure=0.0,
+    pressure,
     fixed=false,
     perturbation=0.0,
 ) where {R,W}
-    length(transitions) == length(states) || throw(ArgumentError("Number of transitions $(length(transitions)) does not match number of states $(length(states))"))
+    length(first(transitions)) == length(states) || throw(ArgumentError("Number of transitions $(length(transitions)) does not match number of states $(length(states))"))
     # length(logic) == length(states) || throw(ArgumentError("Number of logic $(length(logic)) does not match number of states $(length(states))"))
-    ((pressure isa Function) || length(pressure) == length(states)) || throw(ArgumentError("Number of pressure values $(length(pressure)) does not match number of states $(length(states))"))
+    # ((pressure isa Function) || length(pressure) == length(states)) || throw(ArgumentError("Number of pressure values $(length(pressure)) does not match number of states $(length(states))"))
     # length(pressure) == length(states) || throw(ArgumentError("Number of pressure values $(length(pressure)) does not match number of states $(length(states))"))
-    all(t -> length(t) == length(transitions), transitions) || throw(ArgumentError("transition lengths do not match"))
+    all(t -> length(t) == length(first(transitions)), transitions) || throw(ArgumentError("transition lengths do not match"))
     BottomUp{R,W}(stencil, states, transitions, logic, suitability, history, inertia, pressure, fixed, perturbation)
 end
 
@@ -104,13 +104,13 @@ function DynamicGrids.applyrule(data, rule::BottomUp, current_state::T, I) where
         ) do weight, suitability, inertia, potential_state, pressure
         if potential_state != current_state 
             # If we cant directly switch return the typemin
-            rule.logic.direct[potential_state][current_state] || return typemin(typeof(weight))
+            rule.logic[2][potential_state][current_state] || return typemin(typeof(weight))
             # But maybe we can switch indirectly
             found = false
             for (to, s) in enumerate(future_states)
                 s || continue
                 from = potential_state
-                if rule.logic.indirect[to][from] 
+                if rule.logic[end][to][from] 
                     found = true
                 end
             end 

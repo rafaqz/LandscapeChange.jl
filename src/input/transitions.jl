@@ -25,8 +25,10 @@ function indirect_transitions(indices, transitions)
 end
 
 # The first transitions is the "unit" transition - not going anywhere.
+all_transitions(trans::NamedTuple) = all_transitions(NamedVector(map(NamedVector, trans)))
 all_transitions(trans::NamedVector) = (generate_bitmasks(trans), trans, next_transitions(trans)...)
 function next_transitions(transitions::NamedVector{K}) where K
+    # @show transitions
     indices = NamedVector{K}(ntuple(identity, length(K)))
     next = map(indices) do s1
         mapreduce(.|, indices) do s2

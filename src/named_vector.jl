@@ -1,31 +1,36 @@
 struct NamedVector{K,L,T,V} <: FieldVector{L,T}
     val::V
-    NamedVector{K,L,T,V}(val::V) where {K,L,T,V} = new{K,L,T,V}(val)
-    NamedVector{K,L,T,V}(val::V) where {K,L,T,V<:StaticArray} = new{K,L,T,V}(val)
     NamedVector{K,L,T,V}(val::V) where {K,L,T,V<:Tuple} = new{K,L,T,V}(val)
 end
-NamedVector{K,L,T,V}(x1::T, x2::T, xs::T...) where {K,L,T,V} = NamedVector{K,L,T,V}((x1, x2, xs...))
 
+NamedVector{K,L,T}(x1::T, x2::T, xs::T...) where {K,L,T} = NamedVector{K,L,T}((x1, x2, xs...))
+NamedVector{K,L,T}(t::V) where {K,L,T,V<:NamedTuple{K,V1}} where V1 = NamedVector{K,L,T}(values(t))
+NamedVector{K,L,T}(val::V) where {K,L,T,V<:StaticArray} = NamedVector{K,L,T}(Tuple(val))
 NamedVector{K,L,T}(t::V) where {K,L,T,V<:Tuple} = NamedVector{K,L,T,V}(t)
-NamedVector{K,L,T}(t::V) where {K,L,T,V<:NamedTuple{K,V1}} where V1 = NamedVector{K,L,T,V1}(t)
-NamedVector(val::NamedTuple{K,V}) where {K,V<:Tuple{Vararg{Any,L}}} where L = NamedVector{K,L}(val)
-NamedVector(val::NamedVector) = val
-NamedVector{K}(t::V) where {K,V<:Tuple{Vararg{<:Any,L}}} where L = NamedVector{K,L}(t)
+
 # Type promotion step...
-function NamedVector{K,L}(t::V) where {K,L,V<:Tuple{Vararg{<:Any,L}}}
-    t_uniform_type = map(x -> convert(promote_type(map(typeof, t)...), x), t)
-    T = promote_type(map(typeof, t)...)
-    NamedVector{K,L,T,NTuple{L,T}}(t_uniform_type)
-end
+# function NamedVector{K,L}(t::V) where {K,L,V<:Tuple{Vararg{<:Any,L}}}
+#     t_uniform_type = map(x -> convert(promote_type(map(typeof, t)...), x), t)
+#     T = promote_type(map(typeof, t)...)
+#     NamedVector{K,L,T,NTuple{L,T}}(t_uniform_type)
+# end
 function NamedVector{K,L}(val::NT) where {K,L,NT<:NamedTuple{K,<:Tuple{Vararg{<:Any,L}}}}
     NamedVector{K,L}(values(val))
 end
 function NamedVector{K,L}(v::V) where {V <: StaticVector{L,T}} where {K,L,T}
     NamedVector{K,L,T,V}(v)
 end
-NamedVector{K}(v::StaticVector{L,T}) where {K,L,T} = NamedVector{K,L}(v)
-NamedVector{K}(v::AbstractVector{T}) where {K,T} = NamedVector{K}(StaticVector{length(K),T}(v))
+NamedVector{K,L}(v::AbstractVector{T}) where {K,L,T} = 
+    NamedVector{K,L,T}(ntuple(i -> v[i], Val{L}()))
+
+NamedVector{K}(val::NamedTuple) where {K} = NamedVector{K}(val[K])
+NamedVector{K}(t::V) where {K,V<:Tuple{Vararg{<:Any,L}}} where L = NamedVector{K,L}(t)
+NamedVector{K}(v::StaticVector{L,T}) where {K,L,T} = NamedVector{K,L,T}(v)
+NamedVector{K}(v::AbstractVector{T}) where {K,T} = NamedVector{K,length(K)}(v)
+NamedVector{K}(t::NTuple{L,T}) where {K,L,T} = NamedVector{K,L,T}(t)
 NamedVector(; kw...) = NamedVector{keys(kw),length(kw)}(values(kw)) 
+NamedVector(val::NamedTuple{K,V}) where {K,V<:Tuple{Vararg{Any,L}}} where L = NamedVector{K,L}(values(val))
+NamedVector(val::NamedVector) = val
 
 
 Base.@assume_effects :foldable function Base.getproperty(nv::NamedVector{names}, k::Symbol) where names
@@ -95,4 +100,4 @@ end
 _maybeparent(a::NamedVector) = parent(a)
 _maybeparent(nt::NamedTuple) = nt
 
-Base.tail(a::NamedVector{K,L,T}) where {K,L,T} = NamedVector(Base.tail(parent(a)))
+Base.tail(a::NamedVector) where {K,L,T} = NamedVector{Base.tail(K)}(Base.tail(parent(a)))
