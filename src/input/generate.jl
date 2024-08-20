@@ -15,6 +15,8 @@ end
 function compile_timeline(file_list::NamedTuple{Keys}, mask::Raster, names::NamedTuple) where Keys
     println("Generating raster slices...")
     forced = []
+
+
     files = map(file_list, NamedTuple{Keys}(Keys)) do (image_path, data), key
         raster_path = splitext(image_path)[1] * ".tif"
         raw = rebuild(mask .* _fix_order(Raster(raster_path)); missingval=0)
@@ -35,6 +37,7 @@ function compile_timeline(file_list::NamedTuple{Keys}, mask::Raster, names::Name
         end
         (; raw, grouped, times, specification, original_names)
     end
+
     alltimes = sort!(union(map(f -> f.times, files)...))
     timeline_dict = Dict{Int,Any}()
     for file in files
@@ -51,6 +54,7 @@ function compile_timeline(file_list::NamedTuple{Keys}, mask::Raster, names::Name
     end
     timeline_pairs = sort!(collect(pairs(timeline_dict)); by=first)
     stacks = map(identity, RasterStack.(last.(timeline_pairs)))
+
     if eltype(stacks) == Any
         return nothing
     else
@@ -81,30 +85,32 @@ function _category_raster(raster::Raster, layer_names::Vector, categories::Named
         _category_raster(raster, layer_names, category, mask, forced, time, key)
     end
 end
-function _category_raster(raster::Raster, layer_names::Vector, category_components::Vector, mask, forced, time, key)::Raster{Bool}
-    layers = map(l -> _category_raster(raster, layer_names, l, mask, forced, time, key), category_components)
-    out = rebuild(Bool.(broadcast(|, layers...)); missingval=false) .& mask
+function _category_raster(raster::Raster, layer_names::Vector, category_components::Vector, mask, forced, time, key::Symbol)::Raster{Bool}
+    layers = map(category_components) do l
+        _category_raster(raster, layer_names, l, mask, forced, time, key)
+    end
+    out = rebuild(Bool.(broadcast(|, layers...) .& mask); missingval=false)
     @assert missingval(out) == false
     return out
 end
-function _category_raster(raster::Raster, layer_names::Vector, categoryfunc::Tuple{<:Function,Vararg}, mask, forced, time, key)::Raster{Bool}
+function _category_raster(raster::Raster, layer_names::Vector, categoryfunc::Tuple{<:Function,Vararg}, mask, forced, time, key::Symbol)::Raster{Bool}
     f, args... = categoryfunc
     vals = map(args) do layer
         _category_raster(raster, layer_names, layer, mask, forced, time, key)
     end
     return map(f, vals...) .& mask
 end
-function _category_raster(raster::Raster, layer_names::Vector, category::Symbol, mask, forced, time, key)::Raster{Bool}
+function _category_raster(raster::Raster, layer_names::Vector, category::Symbol, mask, forced, time, key::Symbol)::Raster{Bool}
     if category === :mask
         return mask
     else
         error(":$category directive not understood")
     end
 end
-function _category_raster(raster::Raster, layer_names::Vector, category::Nothing, mask, forced, time, key)::Raster{Bool}
+function _category_raster(raster::Raster, layer_names::Vector, category::Nothing, mask, forced, time, key::Symbol)::Raster{Bool}
     return map(_ -> false, raster)
 end
-function _category_raster(raster::Raster, layer_names::Vector, category::String, mask, forced, time, key)::Raster{Bool}
+function _category_raster(raster::Raster, layer_names::Vector, category::String, mask, forced, time, key::Symbol)::Raster{Bool}
     I = findall(==(category), map(String, layer_names))
     if length(I) == 0
         error("could not find $category in $(layer_names)")
@@ -119,13 +125,13 @@ function _category_raster(raster::Raster, layer_names::Vector, category::String,
     @assert missingval(out) == false
     return out .& mask
 end
-function _category_raster(raster::Raster, layer_names::Vector, x::Pair, mask, forced, time, key)
+function _category_raster(raster::Raster, layer_names::Vector, x::Pair, mask, forced, time, key::Symbol)
     x[1] == :force || error("$(x[1]) not recognised")
     cr = _category_raster(raster, layer_names, x[2], mask, forced, time, key)
     push!(forced, time => key => cr)
     return cr
 end
-function _category_raster(raster::Raster, layer_names::Vector, x, mask, forced, time, key)
+function _category_raster(raster::Raster, layer_names::Vector, x, mask, forced, time, key::Symbol)
     error("slice must be a NamedTuple, String or Vector{String}, got a $(typeof(x)) - $x")
 end
 
